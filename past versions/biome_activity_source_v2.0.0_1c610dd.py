@@ -10,9 +10,7 @@ import shutil, glob
 import atexit
 import difflib
 import json, requests, time, os, threading, re, webbrowser, random, keyboard, pyautogui, pytesseract, autoit, psutil, \
-    locale, win32gui, win32process, win32con, ctypes, queue, mouse, sys
-
-current_ver = "v2.0.3"
+    locale, win32gui, win32process, win32con, ctypes, queue, pyperclip, mouse
 
 def apply_fast_flags(version=None, force=False):
     config_paths = [
@@ -255,77 +253,7 @@ class SnippingWidget:
 
             if self.callback:
                 self.callback(region)
-import itertools
-
-class ActionScheduler:
-    def __init__(self, owner, worker_name="ActionScheduler"):
-        self.owner = owner
-        self._pq = queue.PriorityQueue()
-        self._counter = itertools.count()
-        self._running = True
-        self._worker_thread = threading.Thread(target=self._worker, name=worker_name, daemon=True)
-        self._worker_thread.start()
-        self._action_lock = threading.RLock()
-        self._action_active = threading.Event()
-
-    def enqueue_action(self, fn, name=None, priority=5, block=False, timeout=None):
-        idx = next(self._counter)
-        qname = name or f"action-{idx}"
-        self._pq.put((priority, idx, qname, fn))
-        if block:
-            start = time.time()
-            while True:
-                with self._action_lock:
-                    pass
-                if timeout is not None and (time.time() - start) > timeout:
-                    break
-                time.sleep(0.08)
-            return True
-        return True
-
-    def _worker(self):
-        while self._running:
-            try:
-                try:
-                    priority, idx, name, fn = self._pq.get(timeout=0.7)
-                except Exception:
-                    continue
-
-                self._action_active.set()
-                self._action_lock.acquire()
-                try:
-                    try:
-                        fn()
-                    except Exception:
-                        try:
-                            self.owner.error_logging(
-                                sys.exc_info(),
-                                f"Error executing scheduled action {name}"
-                            )
-                        except Exception:
-                            pass
-                finally:
-                    try:
-                        self._action_lock.release()
-                    except Exception:
-                        pass
-                    self._action_active.clear()
-
-            except Exception:
-                self._action_active.clear()
-                try:
-                    self._action_lock.release()
-                except Exception:
-                    pass
-
-    def stop(self):
-        self._running = False
-        try:
-            while not self._pq.empty():
-                self._pq.get_nowait()
-        except Exception:
-            pass
-
+                
 class BiomePresence():
     def __init__(self):
         try:
@@ -400,10 +328,7 @@ class BiomePresence():
         self._br_sc_running = False
         self._cancel_next_actions_until = datetime.min
         self._merchant_condition = threading.Condition()
-        self._remote_running = False
-        self._mt_running = getattr(self, "_mt_running", False)
-        self.auto_pop_state = getattr(self, "auto_pop_state", False)
-        self._action_scheduler = ActionScheduler(self)
+
         # Buff variables
         self.auto_pop_state = False
         self.buff_vars = {}
@@ -417,7 +342,7 @@ class BiomePresence():
         try:
             if os.path.exists(screenshot_dir):
                 for fname in os.listdir(screenshot_dir):
-                    if fname.startswith(("merchant_", "aura_", "inventory_", "quest", "remote_")):
+                    if fname.startswith(("merchant_", "aura_", "inventory_", "quest")):
                         try:
                             os.remove(os.path.join(screenshot_dir, fname))
                         except Exception:
@@ -432,11 +357,6 @@ class BiomePresence():
         self.variables = {}
         apply_fast_flags()
         self.init_gui()
-        try:
-            keyboard.add_hotkey('f1', lambda: self.start_detection() if not self.detection_running else None)
-            keyboard.add_hotkey('f3', lambda: self.stop_detection() if self.detection_running else None)
-        except Exception:
-             pass
 
         # aura detection:
         self.last_aura_found = None
@@ -453,8 +373,8 @@ class BiomePresence():
         return []
 
     def load_biome_data(self):
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/biomes_data.json"
-        eventUrl = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/active_events.json"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/biomes_data.json"
+        eventUrl = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/main/active_events.json"
 
         default_biome_data = {
             "NORMAL": {
@@ -500,10 +420,6 @@ class BiomePresence():
             "DREAMSPACE": {
                 "color": "0xea9dda",
                 "thumbnail_url": "https://maxstellar.github.io/biome_thumb/DREAMSPACE.png"
-            },
-            "CYBERSPACE": {
-                "color": "0x0A1A3D",
-                "thumbnail_url": "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/images/CYBERSPACE.png"
             }
         }
 
@@ -548,7 +464,7 @@ class BiomePresence():
         return data
 
     def load_notice_tab(self):
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/noticetabcontents.txt"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/noticetabcontents.txt"
         data = ""
         try:
             r = requests.get(url, timeout=10)
@@ -722,7 +638,6 @@ class BiomePresence():
             "quest2_button": self.config.get("quest2_button", self.config.get("quest2_button", [0, 0])),
             "quest3_button": self.config.get("quest3_button", self.config.get("quest3_button", [0, 0])),
             "claim_quest_button": self.config.get("claim_quest_button", self.config.get("claim_quest_button", [0, 0])),
-            "quest_reroll_button": self.config.get("quest_reroll_button", self.config.get("quest_reroll_button", [0, 0])),
             "enable_potion_crafting": self.enable_potion_crafting_var.get(),
             "potion_button1": [self.potion_button1_x.get(), self.potion_button1_y.get()],
             "potion_search_bar1": [self.potion_search_x.get(), self.potion_search_y.get()],
@@ -737,9 +652,6 @@ class BiomePresence():
             "potion_switch_interval": self.potion_switch_interval_var.get() if hasattr(self, "potion_switch_interval_var") else self.config.get("potion_switch_interval", "60"),
             "potion_file2": self.potion2_var.get() if hasattr(self, "potion2_var") else self.config.get("potion_file2", ""),
             "potion_file3": self.potion3_var.get() if hasattr(self, "potion3_var") else self.config.get("potion_file3", ""),
-            "remote_access_enabled": self.remote_access_var.get() if hasattr(self, "remote_access_var") else self.config.get("remote_access_enabled", False),
-            "remote_bot_token": self.remote_bot_token_var.get() if hasattr(self, "remote_bot_token_var") else self.config.get("remote_bot_token", ""),
-            "remote_allowed_user_id": self.remote_allowed_user_id_var.get() if hasattr(self, "remote_allowed_user_id_var") else self.config.get("remote_allowed_user_id", ""),
         })
 
         if not config["auto_buff_glitched"]:
@@ -899,7 +811,7 @@ class BiomePresence():
         icon_path = os.path.join(abslt_path, "NoteabBiomeTracker.ico")
 
         self.root = ttk.Window(themename=selected_theme)
-        self.set_title_threadsafe(f"Coteab Macro {current_ver} (Idle)")
+        self.set_title_threadsafe("Coteab Macro v2.0.0-beta3 (Idle)")
         self.root.geometry("1000x700")
         self.root.minsize(900, 600)
         try:
@@ -980,12 +892,10 @@ class BiomePresence():
         customizations_frame = ttk.Frame(content_frame)
         credits_frame = ttk.Frame(content_frame)
         donations_frame = ttk.Frame(content_frame)
-        remote_access_frame = ttk.Frame(content_frame)
 
         frames = {
             "Notice": notice_frame,
             "Webhook": webhook_frame,
-            "Remote Access": remote_access_frame,
             "Misc": misc_frame,
             "Merchant": merchant_frame,
             "Auras": aura_webhook_frame,
@@ -1012,7 +922,6 @@ class BiomePresence():
         self.create_credit_tab(credits_frame)
         self.create_donations_tab(donations_frame)
         self.create_potion_craft_tab(hp_craft_frame)
-        self.create_remote_access_tab(remote_access_frame)
 
         nav_buttons = {}
 
@@ -1069,13 +978,13 @@ class BiomePresence():
         self.save_config()
 
     def check_for_updates(self):
-        current_version = current_ver
+        current_version = "v1.6.5"
         dont_ask_again = self.config.get("dont_ask_for_update", False)
 
         if dont_ask_again: return
 
         try:
-            response = requests.get("https://api.github.com/repos/cresqnt-sys/Noteab-Macro-Unrestricted/releases/latest")
+            response = requests.get("https://api.github.com/repos/xVapure/Noteab-Macro/releases/latest")
             response.raise_for_status()
             latest_release = response.json()
             latest_version = latest_release['tag_name']
@@ -1118,11 +1027,11 @@ class BiomePresence():
         settings_window.title("Biome Settings")
 
         silly_note_label = ttk.Label(settings_window,
-                                     text="GLITCHED, DREAMSPACE & CYBERSPACE are both forced 'everyone' ping grrr >:((",
+                                     text="GLITCHED and DREAMSPACE are both forced 'everyone' ping grrr >:((",
                                      foreground="red")
         silly_note_label.grid(row=0, columnspan=2, padx=(10, 0), pady=(10, 0))
 
-        biomes = [biome for biome in self.biome_data.keys() if biome not in ["GLITCHED", "DREAMSPACE", "CYBERSPACE", "NORMAL"]]
+        biomes = [biome for biome in self.biome_data.keys() if biome not in ["GLITCHED", "DREAMSPACE", "NORMAL"]]
         window_height = max(475, len(biomes) * 43)
         settings_window.geometry(f"465x{window_height}")
 
@@ -1219,908 +1128,10 @@ class BiomePresence():
                                                                                           sticky="e", padx=10)
         ttk.Button(frame, text="Import Config", command=self.import_config).grid(row=2, column=2, pady=10, sticky="w",
                                                                                  padx=10)
-    def create_remote_access_tab(self, frame):
-        self.remote_access_var = ttk.BooleanVar(value=self.config.get("remote_access_enabled", False))
-        en_cb = ttk.Checkbutton(frame, text="Enable Remote Access Control", variable=self.remote_access_var, command=self._remote_access_toggle)
-        en_cb.pack(anchor="w", padx=8, pady=(8,4))
-        token_frame = ttk.Frame(frame)
-        token_frame.pack(fill="x", padx=8, pady=4)
-        ttk.Label(token_frame, text="Discord Bot Token:").pack(side="left", padx=(0,6))
-        self.remote_bot_token_var = ttk.StringVar(value=self.config.get("remote_bot_token", ""))
-        self.remote_bot_token_entry = ttk.Entry(token_frame, textvariable=self.remote_bot_token_var, width=48)
-        self.remote_bot_token_entry.pack(side="left", padx=(0,6))
-        self.remote_bot_token_entry.bind("<FocusOut>", lambda e: self.save_config())
-        id_frame = ttk.Frame(frame)
-        id_frame.pack(fill="x", padx=8, pady=4)
-        ttk.Label(id_frame, text="Allowed User ID:").pack(side="left", padx=(0,6))
-        self.remote_allowed_user_id_var = ttk.StringVar(value=self.config.get("remote_allowed_user_id", ""))
-        self.remote_allowed_user_id_entry = ttk.Entry(id_frame, textvariable=self.remote_allowed_user_id_var, width=24)
-        self.remote_allowed_user_id_entry.pack(side="left", padx=(0,6))
-        self.remote_allowed_user_id_entry.bind("<FocusOut>", lambda e: self.save_config())
-        link = ttk.Label(frame, text="Setup tutorial", foreground="royalblue", cursor="hand2")
-        link.configure(font=('Segoe UI', 9, 'underline'))
-        link.pack(anchor="w", padx=8, pady=(6,0))
-        link.bind("<Button-1>", lambda e: webbrowser.open_new("https://youtu.be/y3gocH9Hd18"))
-        self.remote_status_label = ttk.Label(frame, text="Bot: stopped")
-        self.remote_status_label.pack(anchor="w", padx=8, pady=(6,0))
-        self.remote_command_queue = queue.Queue()
-        self._remote_check_merchant_results = {}
-        self._help_command_list = [
-            ("screenshot", "", "Take current ingame screenshot and send to webhooks. For inventory/aura screenshot, you'll need periodical inventory screenshot/aura enabled. For full screenshot you need neither of them."),
-            ("reroll_quest", "{quest name}", "Reroll a daily quest. Quest 1 is the first quest on the list and so on."),
-            ("check_merchant", "", "Use merchant teleporter immediately and check whether if a merchant has spawned or not."),
-            ("use", "{item_name} {amount}", "Use item remotely."),
-            ("rejoin", "", "Close Roblox to force rejoin (requires Auto Reconnect enabled)."),
-        ]
-        self.remote_worker_running = False
-        self.remote_bot_thread = None
-        self.remote_bot_obj = None
-        self._remote_running = False
-
-
-    def _remote_access_toggle(self):
-        self.save_config()
-        if self.remote_access_var.get():
-            try:
-                token = self.remote_bot_token_var.get().strip()
-                if token:
-                    self.start_remote_bot()
-            except Exception:
-                pass
-        else:
-            try:
-                self.stop_remote_bot()
-            except Exception:
-                pass
-
-    def start_remote_bot(self):
-        if getattr(self, "remote_bot_thread", None) and self.remote_bot_thread and self.remote_bot_thread.is_alive():
-            return
-        token = self.remote_bot_token_var.get().strip()
-        if not token:
-            messagebox.showwarning("Remote Access", "Please enter a bot token first.")
-            return
-        self.remote_worker_running = True
-        self.remote_bot_thread = threading.Thread(target=self._remote_bot_thread_func, daemon=True)
-        self.remote_bot_thread.start()
-        self.save_config()
-
-    def stop_remote_bot(self):
-        try:
-            self.remote_worker_running = False
-            if getattr(self, "remote_bot_obj", None):
-                try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(self.remote_bot_obj.close())
-                except Exception:
-                    pass
-            self.remote_bot_obj = None
-            self.remote_status_label.config(text="Bot: stopped")
-        except Exception:
-            pass
-
-    def _remote_bot_thread_func(self):
-        try:
-            token = self.remote_bot_token_var.get().strip()
-            allowed_id = self.remote_allowed_user_id_var.get().strip()
-            try:
-                allowed_id_int = int(allowed_id) if allowed_id else None
-            except Exception:
-                allowed_id_int = None
-            import asyncio
-            import discord
-            from discord import Option
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            bot = discord.Bot()
-            self.remote_bot_obj = bot
-            @bot.slash_command(name="rejoin", description="Close Roblox to force rejoin (requires Auto Reconnect enabled)")
-            async def rejoin(ctx):
-                try:
-                    if allowed_id_int and getattr(ctx.author, "id", None) != allowed_id_int:
-                        try:
-                            await ctx.respond("Unauthorized", ephemeral=True)
-                        except Exception:
-                            pass
-                        return
-                    try:
-                        if not self.config.get("auto_reconnect"):
-                            try:
-                                await ctx.respond("Auto Reconnect is disabled. Enable it in settings to use /rejoin.", ephemeral=True)
-                            except Exception:
-                                pass
-                            return
-                    except Exception:
-                        pass
-                    try:
-                        self.remote_command_queue.put(("__rejoin__", ""))
-                        try:
-                            await ctx.respond("Queued rejoin — will close Roblox if running.", ephemeral=False)
-                        except Exception:
-                            pass
-                    except Exception:
-                        try:
-                            await ctx.respond("Queue error", ephemeral=True)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            @bot.slash_command(name="help", description="Helping u out with remote access features")
-            async def help_cmd(ctx, page: Option(int, "Page number", required=False, default=1)):
-                try:
-                    cmds = getattr(self, "_help_command_list", [])
-                    per = 5
-                    total = (len(cmds) + per - 1) // per if cmds else 1
-                    p = (page or 1)
-                    try:
-                        p = int(p)
-                    except Exception:
-                        p = 1
-                    if p < 1:
-                        p = 1
-                    if p > total:
-                        p = total
-                    start = (p - 1) * per
-                    end = start + per
-                    page_items = cmds[start:end]
-                    lines = []
-                    for idx, cmd in enumerate(page_items, start=1):
-                        name = cmd[0] if len(cmd) > 0 else ""
-                        usage = cmd[1] if len(cmd) > 1 else ""
-                        desc = cmd[2] if len(cmd) > 2 else ""
-                        lines.append(f"`/{name} {usage}` - {desc}")
-                    content = f"Help page {p}/{total}\n" + ("\n".join(lines) if lines else "No commands on this page")
-                    try:
-                        await ctx.respond(content, ephemeral=False)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            @bot.slash_command(name="use", description="Use an item remotely")
-            async def use(ctx, item: Option(str, "Item name"), amount: Option(int, "Amount", default=1)):
-                try:
-                    if allowed_id_int and getattr(ctx.author, "id", None) != allowed_id_int:
-                        try:
-                            await ctx.respond("Unauthorized", ephemeral=True)
-                        except Exception:
-                            pass
-                        return
-                    try:
-                        self.remote_command_queue.put((str(item), int(amount)))
-                        try:
-                            await ctx.respond(f"Queued {item}, amount: {amount}", ephemeral=False)
-                        except Exception:
-                            pass
-                    except Exception:
-                        try:
-                            await ctx.respond("Queue error", ephemeral=True)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            @bot.slash_command(name="check_merchant", description="Use merchant teleporter and check for merchant")
-            async def check_merchant(ctx):
-                try:
-                    if allowed_id_int and getattr(ctx.author, "id", None) != allowed_id_int:
-                        try:
-                            await ctx.respond("Unauthorized", ephemeral=True)
-                        except Exception:
-                            pass
-                        return
-                    try:
-                        uid = str(time.time()).replace(".", "")
-                        self._remote_check_merchant_results[uid] = None
-                        try:
-                            await ctx.respond("Carrying out auto merchants and checking whether if a merchant has spawned...", ephemeral=False)
-                        except Exception:
-                            pass
-                        try:
-                            self.remote_command_queue.put(("__check_merchant__", uid))
-                        except Exception:
-                            pass
-                        try:
-                            import asyncio
-                            asyncio.create_task(self._remote_check_merchant_wait_and_edit(ctx, uid))
-                        except Exception:
-                            pass
-                    except Exception:
-                        try:
-                            await ctx.respond("Queue error", ephemeral=True)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            @bot.slash_command(name="screenshot", description="Take current ingame screenshot and send to webhooks")
-            async def screenshot(ctx, target: Option(str, """arguments: 'inventory' or 'aura', leave blank for full screen screenshot.""", required=False)):
-                try:
-                    if allowed_id_int and getattr(ctx.author, "id", None) != allowed_id_int:
-                        try:
-                            await ctx.respond("Unauthorized", ephemeral=True)
-                        except Exception:
-                            pass
-                        return
-                    try:
-                        t = (str(target) or "").strip().lower()
-                        if not t:
-                            t = "full"
-                        if t not in ("full", "inventory", "aura"):
-                            t = "full"
-                        self.remote_command_queue.put(("__screenshot__", t))
-                        try:
-                            await ctx.respond(f"Queued screenshot ({t})", ephemeral=False)
-                        except Exception:
-                            pass
-                    except Exception:
-                        try:
-                            await ctx.respond("Queue error", ephemeral=True)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            @bot.slash_command(name="reroll_quest", description="Reroll a selected daily quest")
-            async def reroll_quest(ctx, quest: Option(str, "Quest to reroll", choices=["Quest 1", "Quest 2", "Quest 3"])):
-                try:
-                    if allowed_id_int and getattr(ctx.author, "id", None) != allowed_id_int:
-                        try:
-                            await ctx.respond("Unauthorized", ephemeral=True)
-                        except Exception:
-                            pass
-                        return
-                    try:
-                        q = (quest or "").strip().lower()
-                        if q in ("quest 1", "quest1", "1"):
-                            self.remote_command_queue.put(("__reroll__", "1"))
-                        elif q in ("quest 2", "quest2", "2"):
-                            self.remote_command_queue.put(("__reroll__", "2"))
-                        elif q in ("quest 3", "quest3", "3"):
-                            self.remote_command_queue.put(("__reroll__", "3"))
-                        else:
-                            self.remote_command_queue.put(("__reroll__", "1"))
-                        try:
-                            await ctx.respond(f"Queued reroll {quest}", ephemeral=False)
-                        except Exception:
-                            pass
-                    except Exception:
-                        try:
-                            await ctx.respond("Queue error", ephemeral=True)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            try:
-                self.set_title_threadsafe(f"Coteab Macro {current_ver} (Remote bot starting)")
-            except Exception:
-                pass
-            try:
-                self.remote_status_label.config(text="Bot: running")
-            except Exception:
-                pass
-            worker = threading.Thread(target=self._remote_queue_worker, daemon=True)
-            worker.start()
-            try:
-                bot.run(token)
-            except Exception:
-                pass
-        except Exception:
-            pass
-        finally:
-            try:
-                self.remote_status_label.config(text="Bot: stopped")
-            except Exception:
-                pass
-            self.remote_bot_obj = None
-            self.remote_worker_running = False
-
-    async def _remote_check_merchant_wait_and_edit(self, ctx, uid):
-        try:
-            import asyncio
-            timeout = 20.0
-            waited = 0.0
-            interval = 0.5
-            result = None
-            while waited < timeout:
-                try:
-                    result = self._remote_check_merchant_results.get(uid) if isinstance(self._remote_check_merchant_results, dict) else None
-                except Exception:
-                    result = None
-                if result is not None:
-                    break
-                await asyncio.sleep(interval)
-                waited += interval
-            if result is True:
-                try:
-                    try:
-                        await ctx.interaction.edit_original_response(content="Merchant found!")
-                    except Exception:
-                        try:
-                            await ctx.respond("Merchant found!", ephemeral=False)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            elif result is False:
-                try:
-                    try:
-                        await ctx.interaction.edit_original_response(content="No merchant was found")
-                    except Exception:
-                        try:
-                            await ctx.respond("No merchant was found", ephemeral=False)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            else:
-                try:
-                    try:
-                        await ctx.interaction.edit_original_response(content="No merchant was found")
-                    except Exception:
-                        try:
-                            await ctx.respond("No merchant was found", ephemeral=False)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            try:
-                if isinstance(self._remote_check_merchant_results, dict) and uid in self._remote_check_merchant_results:
-                    try:
-                        del self._remote_check_merchant_results[uid]
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    def _remote_queue_worker(self):
-        while getattr(self, "remote_worker_running", False):
-            try:
-                cmd = None
-                try:
-                    cmd = self.remote_command_queue.get(timeout=1)
-                except Exception:
-                    continue
-                if cmd is None:
-                    continue
-                item_name, amount = cmd[0], cmd[1]
-                if item_name == "__reroll__":
-                    if not self.detection_running or self.reconnecting_state:
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                        continue
-
-                    if getattr(self, "_br_sc_running", False) or getattr(self, "_mt_running", False) or getattr(self, "auto_pop_state", False) or getattr(self, "on_auto_merchant_state", False):
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                        continue
-
-                    def _reroll_action():
-                        try:
-                            self._remote_running = True
-                            try:
-                                self.remote_status_label.config(text=f"Bot: rerolling quest {amount}")
-                            except Exception:
-                                pass
-                            try:
-                                self.perform_quest_reroll(amount)
-                            except Exception:
-                                pass
-                        finally:
-                            self._remote_running = False
-                            try:
-                                self.remote_status_label.config(text="Bot: running")
-                            except Exception:
-                                pass
-
-                    try:
-                        self._action_scheduler.enqueue_action(_reroll_action, name=f"remote:reroll:{amount}", priority=6)
-                    except Exception:
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                    continue
-
-                if item_name == "__check_merchant__":
-                    uid = (amount or "")
-                    if not self.detection_running or self.reconnecting_state:
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, uid))
-                        except Exception:
-                            pass
-                        continue
-
-                    if getattr(self, "_br_sc_running", False) or getattr(self, "_mt_running", False) or getattr(self, "auto_pop_state", False) or getattr(self, "on_auto_merchant_state", False):
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, uid))
-                        except Exception:
-                            pass
-                        continue
-
-                    def _check_merchant_action():
-                        try:
-                            self._remote_running = True
-                            try:
-                                self.remote_status_label.config(text="Bot: checking merchant")
-                            except Exception:
-                                pass
-                            try:
-                                snapshot = {}
-                                try:
-                                    snapshot = dict(self.last_merchant_sent) if hasattr(self, "last_merchant_sent") else {}
-                                except Exception:
-                                    snapshot = {}
-                                try:
-                                    if hasattr(self, "_merchant_teleporter_impl"):
-                                        try:
-                                            self._merchant_teleporter_impl()
-                                        except Exception:
-                                            try:
-                                                self.use_merchant_teleporter()
-                                            except Exception:
-                                                pass
-                                    else:
-                                        try:
-                                            self.use_merchant_teleporter()
-                                        except Exception:
-                                            pass
-                                except Exception:
-                                    pass
-                                found = False
-                                try:
-                                    if hasattr(self, "last_merchant_sent"):
-                                        for k, v in (self.last_merchant_sent.items() if isinstance(self.last_merchant_sent, dict) else []):
-                                            if k not in snapshot or snapshot.get(k) != v:
-                                                try:
-                                                    if isinstance(k, tuple) and len(k) > 1 and k[1] == "ocr":
-                                                        found = True
-                                                        break
-                                                except Exception:
-                                                    pass
-                                except Exception:
-                                    found = False
-                                try:
-                                    self._remote_check_merchant_results[uid] = True if found else False
-                                except Exception:
-                                    pass
-                            except Exception:
-                                try:
-                                    self._remote_check_merchant_results[uid] = False
-                                except Exception:
-                                    pass
-                        finally:
-                            self._remote_running = False
-                            try:
-                                self.remote_status_label.config(text="Bot: running")
-                            except Exception:
-                                pass
-
-                    try:
-                        self._action_scheduler.enqueue_action(_check_merchant_action, name=f"remote:check_merchant:{uid}", priority=3)
-                    except Exception:
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, uid))
-                        except Exception:
-                            pass
-                    continue
-
-                if item_name == "__rejoin__":
-                    if not self.detection_running or self.reconnecting_state:
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                        continue
-
-                    if getattr(self, "_br_sc_running", False) or getattr(self, "_mt_running", False) or getattr(self, "auto_pop_state", False) or getattr(self, "on_auto_merchant_state", False):
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                        continue
-
-                    def remote_rejoin_action():
-                        try:
-                            self._remote_running = True
-                            try:
-                                self.remote_status_label.config(text="Bot: performing rejoin")
-                            except Exception:
-                                pass
-                            try:
-                                if self.check_roblox_procs():
-                                    try:
-                                        self.terminate_roblox_processes()
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-                        finally:
-                            self._remote_running = False
-                            try:
-                                self.remote_status_label.config(text="Bot: running")
-                            except Exception:
-                                pass
-
-                    try:
-                        self._action_scheduler.enqueue_action(remote_rejoin_action, name="remote:rejoin", priority=1)
-                    except Exception:
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                    continue
-
-                if item_name == "__screenshot__":
-                    if not self.detection_running or self.reconnecting_state:
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                        continue
-
-                    if getattr(self, "_br_sc_running", False) or getattr(self, "_mt_running", False) or getattr(self, "auto_pop_state", False) or getattr(self, "on_auto_merchant_state", False):
-                        try:
-                            time.sleep(0.35)
-                            self.remote_command_queue.put((item_name, amount))
-                        except Exception:
-                            pass
-                        continue
-
-                    requested = str(amount or "").lower()
-                    if requested not in ("full", "inventory", "aura"):
-                        requested = "full"
-
-                    if requested == "full":
-                        def _screenshot_action():
-                            try:
-                                self._remote_running = True
-                                try:
-                                    self.remote_status_label.config(text="Bot: taking screenshot")
-                                except Exception:
-                                    pass
-                                try:
-                                    self.remote_take_and_send_screenshot()
-                                except Exception:
-                                    pass
-                            finally:
-                                self._remote_running = False
-                                try:
-                                    self.remote_status_label.config(text="Bot: running")
-                                except Exception:
-                                    pass
-
-                        try:
-                            self._action_scheduler.enqueue_action(_screenshot_action, name="remote:screenshot", priority=0)
-                        except Exception:
-                            try:
-                                time.sleep(0.35)
-                                self.remote_command_queue.put((item_name, amount))
-                            except Exception:
-                                pass
-                        continue
-
-                    if requested == "inventory":
-                        def _inv_action():
-                            try:
-                                self._remote_running = True
-                                try:
-                                    self.remote_status_label.config(text="Bot: taking inventory screenshot")
-                                except Exception:
-                                    pass
-                                try:
-                                    self.take_inventory_screenshot_now()
-                                except Exception:
-                                    pass
-                            finally:
-                                self._remote_running = False
-                                try:
-                                    self.remote_status_label.config(text="Bot: running")
-                                except Exception:
-                                    pass
-
-                        try:
-                            self._action_scheduler.enqueue_action(_inv_action, name="remote:screenshot:inventory", priority=3)
-                        except Exception:
-                            try:
-                                time.sleep(0.35)
-                                self.remote_command_queue.put((item_name, amount))
-                            except Exception:
-                                pass
-                        continue
-
-                    if requested == "aura":
-                        def _aura_action():
-                            try:
-                                self._remote_running = True
-                                try:
-                                    self.remote_status_label.config(text="Bot: taking aura screenshot")
-                                except Exception:
-                                    pass
-                                try:
-                                    self.take_aura_screenshot_now()
-                                except Exception:
-                                    pass
-                            finally:
-                                self._remote_running = False
-                                try:
-                                    self.remote_status_label.config(text="Bot: running")
-                                except Exception:
-                                    pass
-
-                        try:
-                            self._action_scheduler.enqueue_action(_aura_action, name="remote:screenshot:aura", priority=2)
-                        except Exception:
-                            try:
-                                time.sleep(0.35)
-                                self.remote_command_queue.put((item_name, amount))
-                            except Exception:
-                                pass
-                        continue
-                if not self.detection_running or self.reconnecting_state:
-                    try:
-                        time.sleep(0.35)
-                        self.remote_command_queue.put((item_name, amount))
-                    except Exception:
-                        pass
-                    continue
-
-                if getattr(self, "_br_sc_running", False) or getattr(self, "_mt_running", False) or getattr(self, "auto_pop_state", False) or getattr(self, "on_auto_merchant_state", False):
-                    try:
-                        time.sleep(0.35)
-                        self.remote_command_queue.put((item_name, amount))
-                    except Exception:
-                        pass
-                    continue
-
-                def _remote_action():
-                    try:
-                        self._remote_running = True
-                        try:
-                            self.remote_status_label.config(text=f"Bot: executing {item_name} x{amount}")
-                        except Exception:
-                            pass
-                        try:
-                            self.remote_use_item(item_name, amount)
-                        except Exception:
-                            pass
-                    finally:
-                        self._remote_running = False
-                        try:
-                            self.remote_status_label.config(text="Bot: running")
-                        except Exception:
-                            pass
-
-                try:
-                    self._action_scheduler.enqueue_action(_remote_action, name=f"remote:{item_name}", priority=1)
-                except Exception:
-                    try:
-                        time.sleep(0.35)
-                        self.remote_command_queue.put((item_name, amount))
-                    except Exception:
-                        pass
-
-            except Exception:
-                time.sleep(0.2)
-                continue
-
-    def take_inventory_screenshot_now(self):
-        try:
-            if not getattr(self, "periodical_inventory_var", None) or not self.periodical_inventory_var.get():
-                return
-            if not self.check_roblox_procs():
-                return
-            self.activate_roblox_window()
-            search_bar = self.config.get("search_bar", [855, 358])
-            inventory_menu = self.config.get("inventory_menu", [36, 535])
-            items_tab = self.config.get("items_tab", [1272, 329])
-            inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
-            if inventory_menu and inventory_menu[0]:
-                try:
-                    autoit.mouse_click("left", inventory_menu[0], inventory_menu[1], 1, speed=3)
-                except Exception:
-                    try:
-                        self.Global_MouseClick(inventory_menu[0], inventory_menu[1])
-                    except Exception:
-                        pass
-                time.sleep(0.35)
-            if items_tab and items_tab[0]:
-                try:
-                    autoit.mouse_click("left", items_tab[0], items_tab[1], 1, speed=3)
-                    time.sleep(1)
-                    autoit.mouse_click("left", search_bar[0], search_bar[1], 1, speed=3)
-                except Exception:
-                    try:
-                        self.Global_MouseClick(items_tab[0], items_tab[1])
-                    except Exception:
-                        pass
-                time.sleep(0.35)
-            try:
-                os.makedirs("images", exist_ok=True)
-                filename = os.path.join("images", f"inventory_screenshot_{int(time.time())}.png")
-                img = pyautogui.screenshot()
-                img.save(filename)
-                self.send_inventory_screenshot_webhook(filename)
-                self.last_inventory_screenshot_time = datetime.now()
-            except Exception as e:
-                self.error_logging(e, "Error taking/sending forced inventory screenshot")
-            try:
-                if inventory_close_button and inventory_close_button[0]:
-                    try:
-                        autoit.mouse_click("left", inventory_close_button[0], inventory_close_button[1], 1, speed=3)
-                    except Exception:
-                        try:
-                            self.Global_MouseClick(inventory_close_button[0], inventory_close_button[1])
-                        except Exception:
-                            pass
-                    time.sleep(0.22)
-            except Exception as e:
-                self.error_logging(e, "Error while closing inventory after forced screenshot")
-        except Exception as e:
-            self.error_logging(e, "Error in take_inventory_screenshot_now")
-
-    def take_aura_screenshot_now(self):
-        try:
-            if not getattr(self, "periodical_aura_var", None) or not self.periodical_aura_var.get():
-                return
-            if not self.check_roblox_procs():
-                return
-            self.activate_roblox_window()
-            aura_menu = self.config.get("aura_menu", [0, 0])
-            search_bar = self.config.get("search_bar", [855, 358])
-            inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
-            if aura_menu and aura_menu[0]:
-                try:
-                    autoit.mouse_click("left", aura_menu[0], aura_menu[1], 1, speed=3)
-                    time.sleep(0.67)
-                    autoit.mouse_click("left", search_bar[0], search_bar[1], 1, speed=3)
-                except Exception:
-                    try:
-                        self.Global_MouseClick(aura_menu[0], aura_menu[1])
-                    except Exception:
-                        pass
-                time.sleep(0.67)
-                try:
-                    os.makedirs("images", exist_ok=True)
-                    filename = os.path.join("images", f"aura_screenshot_{int(time.time())}.png")
-                    img = pyautogui.screenshot()
-                    img.save(filename)
-                    self.send_aura_screenshot_webhook(filename)
-                    self.last_aura_screenshot_time = datetime.now()
-                    autoit.mouse_click("left", inventory_close_button[0], inventory_close_button[1], 1, speed=3)
-                    time.sleep(0.67)
-                except Exception as e:
-                    self.error_logging(e, "Error taking/sending forced aura screenshot")
-        except Exception as e:
-            self.error_logging(e, "Error in take_aura_screenshot_now")
-
-    def remote_use_item(self, item_name, amount):
-        if not self.detection_running or self.reconnecting_state:
-            return
-        inventory_click_delay = int(self.config.get("inventory_click_delay", "0")) / 1000.0
-        for _ in range(4):
-            if not self.detection_running or self.reconnecting_state:
-                return
-            self.activate_roblox_window()
-            time.sleep(0.35)
-        time.sleep(0.57)
-        inventory_menu = self.config.get("inventory_menu", [36, 535])
-        inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
-        self.Global_MouseClick(inventory_menu[0], inventory_menu[1])
-        time.sleep(0.22 + inventory_click_delay)
-        search_bar = self.config.get("search_bar", [855, 358])
-        self.Global_MouseClick(search_bar[0], search_bar[1], click=2)
-        time.sleep(0.23 + inventory_click_delay)
-        try:
-            autoit.send(item_name)
-        except Exception:
-            try:
-                keyboard.write(item_name.lower())
-            except Exception:
-                pass
-        time.sleep(0.22 + inventory_click_delay)
-        first_item_slot = self.config.get("first_item_slot", [839, 434])
-        self.Global_MouseClick(first_item_slot[0], first_item_slot[1])
-        time.sleep(0.27 + inventory_click_delay)
-        amount_box = self.config.get("amount_box", [954, 429])
-        self.Global_MouseClick(amount_box[0], amount_box[1], click=2)
-        time.sleep(0.09 + inventory_click_delay)
-        try:
-            keyboard.send("ctrl+a")
-            time.sleep(0.06 + inventory_click_delay)
-            keyboard.send("backspace")
-            time.sleep(0.06 + inventory_click_delay)
-        except Exception:
-            try:
-                keyboard.send("backspace")
-                time.sleep(0.06 + inventory_click_delay)
-            except Exception:
-                pass
-        try:
-            autoit.send(str(amount))
-        except Exception:
-            try:
-                keyboard.write(str(amount))
-            except Exception:
-                pass
-        time.sleep(0.12 + inventory_click_delay)
-        use_button = self.config.get("use_button", [995, 498])
-        self.Global_MouseClick(use_button[0], use_button[1])
-        time.sleep(0.25)
-        self.Global_MouseClick(inventory_close_button[0], inventory_close_button[1])
-        time.sleep(0.12)
-
-    def send_screen_screenshot_webhook(self, screenshot_path):
-        try:
-            urls = self.get_webhook_list()
-            if not urls:
-                return
-            content = ""
-            icon_url = "https://i.postimg.cc/rsXpGncL/Noteab-Biome-Tracker.png"
-            current_utc_time = datetime.now(timezone.utc)
-            current_utc_time.replace(microsecond=0).isoformat(timespec='seconds') + 'Z'
-            current_utc_time = str(current_utc_time)
-            embed = {
-                "description": f"> ## Remote Screenshot",
-                "color": 0xffffff,
-                "footer": {"text": f"Coteab Macro {current_ver}", "icon_url": icon_url},
-                "timestamp": current_utc_time
-            }
-            for webhook_url in urls:
-                try:
-                    embed_copy = dict(embed)
-                    embed_copy["image"] = {"url": f"attachment://{os.path.basename(screenshot_path)}"}
-                    with open(screenshot_path, "rb") as image_file:
-                        files = {"file": (os.path.basename(screenshot_path), image_file, "image/png")}
-                        data = {"payload_json": json.dumps({"content": content, "embeds": [embed_copy]})}
-                        requests.post(webhook_url, data=data, files=files, timeout=10)
-                except Exception as e:
-                    try:
-                        print(f"Failed to send screenshot to {webhook_url}: {e}")
-                    except Exception:
-                        pass
-        except Exception as e:
-            self.error_logging(e, "Error in send_screen_screenshot_webhook")
-
-    def remote_take_and_send_screenshot(self):
-        try:
-            if not self.detection_running or self.reconnecting_state:
-                return
-            for _ in range(4):
-                if not self.detection_running or self.reconnecting_state:
-                    return
-                self.activate_roblox_window()
-                time.sleep(0.35)
-            time.sleep(0.5)
-            try:
-                os.makedirs("images", exist_ok=True)
-                filename = os.path.join("images", f"remote_screenshot_{int(time.time())}.png")
-                img = pyautogui.screenshot()
-                img.save(filename)
-                self.send_screen_screenshot_webhook(filename)
-            except Exception as e:
-                self.error_logging(e, "Error taking/sending remote screenshot")
-        except Exception:
-            pass
 
     def create_donations_tab(self, frame):
         t1 = "Our projects are 100% free to use and you're allowed to recycle any fraction of our code with proper credits. However, if you want to support our team, you can help us by purchasing any of the gamepasses below :)"
-        t2 = """It helps us out a lot mentally, any donations above 100 Robux will get you on the appreciation list below, 500 Robux will give you the permission to leave a special message on the appreciation list (must be sfw though) & 1000 Robux will give you access to early Coteab macro releases (beta vers) :D Normally we will check donations history daily, but if your Roblox username isn't displayed here please DM "@criticize." on Discord. The appreciation list also takes up to 5 minutes to update due to Github."""
+        t2 = """It helps us out a lot mentally, any donations above 100 Robux will get you on the appreciation list below, 500 Robux will give you the permission to leave a special message on the appreciation list (must be sfw though) :D Normally we will check donations history daily, but if your Roblox username isn't displayed here please DM "@criticize." on Discord. The appreciation list also takes up to 5 minutes to update due to Github."""
         link = "https://www.roblox.com/games/18203398779/Medival-castle#!/store"
         ttk.Label(frame, text=t1, justify="left", wraplength=700).pack(padx=10, pady=(12, 6), anchor="w")
         ttk.Label(frame, text=t2, justify="left", wraplength=700).pack(padx=10, pady=(0, 6), anchor="w")
@@ -2132,7 +1143,7 @@ class BiomePresence():
         hall.pack(fill='both', expand=True, padx=5, pady=5)
         txt = ttk.Text(hall, height=14, wrap="word")
         txt.pack(fill="both", expand=True, padx=8, pady=8)
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/appreciation_list.txt"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/appreciation_list.txt"
         try:
             r = requests.get(url, timeout=10)
             r.raise_for_status()
@@ -2560,7 +1571,7 @@ class BiomePresence():
     def create_notice_tab(self, frame):
         txt = ttk.Text(frame, height=14, wrap="word")
         txt.pack(fill="both", expand=True, padx=5, pady=(5, 90))
-        notice_url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/noticetabcontents.txt"
+        notice_url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/noticetabcontents.txt"
         try:
             r = requests.get(notice_url, timeout=10)
             r.raise_for_status()
@@ -2589,12 +1600,12 @@ class BiomePresence():
         update_label.pack(side="top", fill="x", anchor="w", padx=5)
 
         def _open_releases(_=None):
-            webbrowser.open_new("https://github.com/cresqnt-sys/Noteab-Macro-Unrestricted/releases/latest")
+            webbrowser.open_new("https://github.com/xVapure/Noteab-Macro/releases/latest")
 
         def _check_latest():
-            current_version = current_ver
+            current_version = "v1.6.5"
             try:
-                response = requests.get("https://api.github.com/repos/cresqnt-sys/Noteab-Macro-Unrestricted/releases/latest", timeout=10)
+                response = requests.get("https://api.github.com/repos/xVapure/Noteab-Macro/releases/latest", timeout=10)
                 response.raise_for_status()
                 latest_release = response.json()
                 latest_version = latest_release.get("tag_name") or latest_release.get("name") or ""
@@ -2677,6 +1688,46 @@ class BiomePresence():
         sc_duration_entry = ttk.Entry(hp2_frame, textvariable=self.sc_duration_var, width=10)
         sc_duration_entry.grid(row=3, column=2, padx=5)
         sc_duration_entry.bind("<FocusOut>", lambda event: self.save_config())
+
+        # Merchant Teleporter
+        self.mt_var = ttk.BooleanVar(value=self.config.get("merchant_teleporter", False))
+        mt_check = ttk.Checkbutton(
+            hp2_frame,
+            text="Merchant Teleporter (Auto Merchant)",
+            variable=self.mt_var,
+            command=self.save_config
+        )
+        mt_check.grid(row=4, column=0, padx=5, sticky="w")
+
+        ttk.Label(hp2_frame, text="Usage Duration (minutes):").grid(row=4, column=1, padx=5)
+        self.mt_duration_var = ttk.StringVar(value=self.config.get("mt_duration", "1"))
+        mt_duration_entry = ttk.Entry(hp2_frame, textvariable=self.mt_duration_var, width=10)
+        mt_duration_entry.grid(row=4, column=2, padx=5)
+        mt_duration_entry.bind("<FocusOut>", lambda event: self.save_config())
+
+        self.auto_merchant_in_limbo_var = ttk.BooleanVar(value=self.config.get("auto_merchant_in_limbo", False))
+        self.auto_merchant_in_limbo_check = ttk.Checkbutton(
+            hp2_frame,
+            text="Auto Merchant in Limbo",
+            variable=self.auto_merchant_in_limbo_var,
+            command=self.save_config
+        )
+        def _update_auto_merchant_in_limbo_visibility(*args):
+            if self.mt_var.get():
+                self.auto_merchant_in_limbo_check.grid(row=5, column=0, padx=5, sticky="w")
+            else:
+                try:
+                    self.auto_merchant_in_limbo_check.grid_remove()
+                except Exception:
+                    pass
+        _update_auto_merchant_in_limbo_visibility()
+        try:
+            self.mt_var.trace_add('write', _update_auto_merchant_in_limbo_visibility)
+        except Exception:
+            try:
+                self.mt_var.trace('w', _update_auto_merchant_in_limbo_visibility)
+            except Exception:
+                pass
 
         # Auto Reconnect
         self.auto_reconnect_var = ttk.BooleanVar(value=self.config.get("auto_reconnect", False))
@@ -2799,8 +1850,7 @@ class BiomePresence():
             ("Quest 1 button", "quest1_button"),
             ("Quest 2 button", "quest2_button"),
             ("Quest 3 button", "quest3_button"),
-            ("Claim Quest button", "claim_quest_button"), 
-            ("Quest Reroll button", "quest_reroll_button"),
+            ("Claim Quest button", "claim_quest_button"),
         ]
 
         self.quest_coord_vars = {}
@@ -2849,7 +1899,7 @@ class BiomePresence():
             embed = {
                 "description": f"> ## Daily Quests Screenshot",
                 "color": 0xffffff,
-                "footer": {"text": f"Coteab Macro {current_ver}", "icon_url": icon_url},
+                "footer": {"text": "Coteab Macro (2.0.0-beta3)", "icon_url": icon_url},
                 "timestamp": current_utc_time
             }
             for webhook_url in urls:
@@ -2869,15 +1919,6 @@ class BiomePresence():
             self.error_logging(e, "Error in send_quest_screenshot_webhook")
 
     def perform_quest_claim_sequence_sync(self):
-        try:
-            self._action_scheduler.enqueue_action(self._perform_quest_claim_sequence_impl, name="quest_claim", priority=5)
-        except Exception:
-            try:
-                self._perform_quest_claim_sequence_impl()
-            except Exception:
-                pass
-
-    def _perform_quest_claim_sequence_impl(self):
         try:
             if not getattr(self, "auto_claim_quests_var", None) or not self.auto_claim_quests_var.get():
                 return
@@ -2973,93 +2014,9 @@ class BiomePresence():
                     except Exception:
                         pass
                 time.sleep(0.5)
-            inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
-            try:
-                if inventory_close_button and inventory_close_button[0]:
-                    try:
-                        autoit.mouse_click("left", inventory_close_button[0], inventory_close_button[1], 1, speed=3)
-                    except Exception:
-                        try:
-                            self.Global_MouseClick(inventory_close_button[0], inventory_close_button[1])
-                        except Exception:
-                            pass
-                    time.sleep(0.3)
-            except Exception:
-                pass
 
         except Exception as e:
             self.error_logging(e, "Error in perform_quest_claim_sequence_sync")
-
-    def perform_quest_reroll(self, quest_index):
-        try:
-            if not getattr(self, "auto_claim_quests_var", None):
-                pass
-            if not self.check_roblox_procs():
-                return
-            for _ in range(4):
-                if not self.detection_running:
-                    return
-                self.activate_roblox_window()
-                time.sleep(0.15)
-            quest_menu = self.config.get("quest_menu", [0, 0])
-            quest1 = self.config.get("quest1_button", [0, 0])
-            quest2 = self.config.get("quest2_button", [0, 0])
-            quest3 = self.config.get("quest3_button", [0, 0])
-            reroll_btn = self.config.get("quest_reroll_button", [0, 0])
-            if quest_menu and quest_menu[0]:
-                try:
-                    autoit.mouse_click("left", quest_menu[0], quest_menu[1], 1, speed=3)
-                except Exception:
-                    try:
-                        self.Global_MouseClick(quest_menu[0], quest_menu[1])
-                    except Exception:
-                        pass
-                time.sleep(0.5)
-            try:
-                qbtn = quest1
-                if str(quest_index) == "2":
-                    qbtn = quest2
-                elif str(quest_index) == "3":
-                    qbtn = quest3
-                if qbtn and qbtn[0]:
-                    try:
-                        autoit.mouse_click("left", qbtn[0], qbtn[1], 1, speed=3)
-                    except Exception:
-                        try:
-                            self.Global_MouseClick(qbtn[0], qbtn[1])
-                        except Exception:
-                            pass
-                    time.sleep(0.4)
-                if reroll_btn and reroll_btn[0]:
-                    try:
-                        autoit.mouse_click("left", reroll_btn[0], reroll_btn[1], 1, speed=3)
-                    except Exception:
-                        try:
-                            self.Global_MouseClick(reroll_btn[0], reroll_btn[1])
-                        except Exception:
-                            pass
-                    time.sleep(0.45)
-
-                inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
-                try:
-                    if inventory_close_button and inventory_close_button[0]:
-                        try:
-                            autoit.mouse_click("left", inventory_close_button[0], inventory_close_button[1], 1, speed=3)
-                        except Exception:
-                            try:
-                                self.Global_MouseClick(inventory_close_button[0], inventory_close_button[1])
-                            except Exception:
-                                pass
-                        time.sleep(0.3)
-                except Exception:
-                    pass
-            except Exception:
-                pass
-        except Exception as e:
-            try:
-                self.error_logging(e, "Error in perform_quest_reroll")
-            except Exception:
-                pass
 
     def quest_claim_loop(self):
         last_claim_time = datetime.min
@@ -3078,11 +2035,11 @@ class BiomePresence():
                 with self.lock:
                     if not self.detection_running:
                         break
-                    self._action_scheduler.enqueue_action(self.perform_periodic_aura_screenshot_sync, name="periodical:aura", priority=2)
+                    self.perform_periodic_aura_screenshot_sync()
                     time.sleep(0.5)
-                    self._action_scheduler.enqueue_action(self.perform_periodic_inventory_screenshot_sync, name="periodical:inventory", priority=3)
+                    self.perform_periodic_inventory_screenshot_sync()
                     time.sleep(0.5)
-                    self._action_scheduler.enqueue_action(self.perform_quest_claim_sequence_sync, name="periodic:quest_claim", priority=4)
+                    self.perform_quest_claim_sequence_sync()
                     last_claim_time = datetime.now()
             except Exception as e:
                 self.error_logging(e, "Error in quest_claim_loop")
@@ -3238,36 +2195,20 @@ class BiomePresence():
             os.makedirs(potions_directory, exist_ok=True)
             files = sorted([f for f in os.listdir(potions_directory) if f.lower().endswith(".json")])
             try:
-                values_with_none = ["None"] + files
-
-                # main potion combo
-                if hasattr(self, "potion_combo"):
-                    self.potion_combo["values"] = values_with_none
-                    cfg_main = self.config.get("potion_last_file", "")
-                    if cfg_main and cfg_main in files:
-                        self.potion_file_var.set(cfg_main)
-                    else:
-                        if not self.potion_file_var.get() or self.potion_file_var.get() not in values_with_none:
-                            self.potion_file_var.set(files[0] if files else "None")
+                self.potion_combo["values"] = files
+                if files and (not self.potion_file_var.get() or self.potion_file_var.get() not in files):
+                    self.potion_file_var.set(files[0])
                 if hasattr(self, "potion2_combo"):
-                    self.potion2_combo["values"] = values_with_none
-                    cfg2 = self.config.get("potion_file2", "")
-                    if cfg2 and cfg2 in files:
-                        self.potion2_var.set(cfg2)
-                    else:
-                        if not self.potion2_var.get() or self.potion2_var.get() not in values_with_none:
-                            self.potion2_var.set("None")
+                    self.potion2_combo["values"] = files
+                    if files and (not self.potion2_var.get() or self.potion2_var.get() not in files):
+                        self.potion2_var.set(self.config.get("potion_file2", "") if self.config.get("potion_file2", "") in files else (files[0] if len(files) > 1 else (files[0] if files else "")))
                 if hasattr(self, "potion3_combo"):
-                    self.potion3_combo["values"] = values_with_none
-                    cfg3 = self.config.get("potion_file3", "")
-                    if cfg3 and cfg3 in files:
-                        self.potion3_var.set(cfg3)
-                    else:
-                        if not self.potion3_var.get() or self.potion3_var.get() not in values_with_none:
-                            self.potion3_var.set("None")
+                    self.potion3_combo["values"] = files
+                    if files and (not self.potion3_var.get() or self.potion3_var.get() not in files):
+                        self.potion3_var.set(self.config.get("potion_file3", "") if self.config.get("potion_file3", "") in files else (" " if len(files) < 3 else files[2]))
             except Exception:
                 pass
-            if self.potion_file_var.get() and self.potion_file_var.get() != "None":
+            if self.potion_file_var.get():
                 self.config["potion_last_file"] = self.potion_file_var.get()
                 self.save_config()
         except Exception as e:
@@ -3498,7 +2439,8 @@ class BiomePresence():
             if potion_search and potion_search[0]:
                 _click(potion_search, label="search_bar", tries=3, pause_after=0.18)
                 time.sleep(0.08)
-                autoit.send(pname)
+                pyperclip.copy(pname)
+                keyboard.press_and_release("ctrl+v")
                 time.sleep(0.18)
             else:
                 self.error_logging(RuntimeError("Missing potion_search coordinates"), "Potion setup warning")
@@ -3578,33 +2520,19 @@ class BiomePresence():
                 return
             if not getattr(self, "enable_potion_crafting_var", None) or not self.enable_potion_crafting_var.get():
                 return
-
             if getattr(self, "enable_potion_switching_var", None) and self.enable_potion_switching_var.get():
                 def switcher():
                     try:
                         while self.detection_running and self.enable_potion_crafting_var.get() and self.enable_potion_switching_var.get():
                             interval = float(self.potion_switch_interval_var.get() or "60")
-
-                            f1_raw = (self.potion_file_var.get().strip() or self.config.get("potion_last_file", ""))
-                            f2_raw = (self.potion2_var.get().strip() or self.config.get("potion_file2", ""))
-                            f3_raw = (self.potion3_var.get().strip() or self.config.get("potion_file3", ""))
-
-                            # treat explicit "None" (case-insensitive) as disabled
-                            def normalize(v):
-                                if not v: return ""
-                                return "" if str(v).strip().lower() == "none" else v
-
-                            order = []
-                            for v in (f1_raw, f2_raw, f3_raw):
-                                nv = normalize(v)
-                                if nv:
-                                    order.append(nv)
-
-                            if not order:
-                                # nothing to run
-                                time.sleep(0.5)
-                                continue
-
+                            f1 = (self.potion_file_var.get().strip() or self.config.get("potion_last_file", ""))
+                            f2 = (self.potion2_var.get().strip() or self.config.get("potion_file2", ""))
+                            f3 = (self.potion3_var.get().strip() or self.config.get("potion_file3", ""))
+                            order = [f1]
+                            if f2:
+                                order.append(f2)
+                            if f3:
+                                order.append(f3)
                             idx = 0
                             while self.detection_running and self.enable_potion_crafting_var.get() and self.enable_potion_switching_var.get():
                                 current_file = order[idx % len(order)]
@@ -3621,7 +2549,7 @@ class BiomePresence():
                 self.potion_run_status.set(f"Switching mode enabled")
             else:
                 file_name = self.potion_file_var.get().strip() or self.config.get("potion_last_file", "")
-                if file_name.lower() == "none" or not file_name:
+                if not file_name:
                     return
                 t = threading.Thread(target=self._potion_thread_launcher, args=(file_name,), daemon=True)
                 t.start()
@@ -3654,87 +2582,46 @@ class BiomePresence():
         merchant_extra_slot_entry.grid(row=2, column=1, padx=0, pady=3, sticky="w")
         merchant_extra_slot_entry.bind("<FocusOut>", lambda event: self.save_config())
 
-        self.mt_var = ttk.BooleanVar(value=self.config.get("merchant_teleporter", False))
-        mt_check = ttk.Checkbutton(
-            frame,
-            text="Enable Auto Merchant (requires merchant teleporter)",
-            variable=self.mt_var,
-            command=self.save_config
-        )
-        mt_check.grid(row=3, column=0, padx=5, pady=3, sticky="w")
-
-        ttk.Label(frame, text="Usage Duration (minutes):").grid(row=3, column=1, padx=5, sticky="w")
-        self.mt_duration_var = ttk.StringVar(value=self.config.get("mt_duration", "1"))
-        mt_duration_entry = ttk.Entry(frame, textvariable=self.mt_duration_var, width=10)
-        mt_duration_entry.grid(row=3, column=2, padx=5, sticky="w")
-        mt_duration_entry.bind("<FocusOut>", lambda event: self.save_config())
-
-        self.auto_merchant_in_limbo_var = ttk.BooleanVar(value=self.config.get("auto_merchant_in_limbo", False))
-        self.auto_merchant_in_limbo_check = ttk.Checkbutton(
-            frame,
-            text="Auto Merchant in Limbo",
-            variable=self.auto_merchant_in_limbo_var,
-            command=self.save_config
-        )
-
-        def update_auto_merchant_in_limbo_visibility(*args):
-            if self.mt_var.get():
-                self.auto_merchant_in_limbo_check.grid(row=4, column=0, padx=5, pady=3, sticky="w")
-            else:
-                try:
-                    self.auto_merchant_in_limbo_check.grid_remove()
-                except Exception:
-                    pass
-
-        update_auto_merchant_in_limbo_visibility()
-        try:
-            self.mt_var.trace_add('write', update_auto_merchant_in_limbo_visibility)
-        except Exception:
-            try:
-                self.mt_var.trace('w', update_auto_merchant_in_limbo_visibility)
-            except Exception:
-                pass
-
         # Ping Mari
         self.ping_mari_var = ttk.BooleanVar(value=self.config.get("ping_mari", False))
         ping_mari_check = ttk.Checkbutton(
             frame, text="Ping if Mari found? (Custom Ping UserID/RoleID: &roleid)",
             variable=self.ping_mari_var, command=self.save_config)
-        ping_mari_check.grid(row=5, column=0, padx=5, pady=3, sticky="w")
+        ping_mari_check.grid(row=3, column=0, padx=5, pady=3, sticky="w")
 
         self.mari_user_id_var = ttk.StringVar(value=self.config.get("mari_user_id", ""))
         mari_user_id_entry = ttk.Entry(frame, textvariable=self.mari_user_id_var, width=15)
-        mari_user_id_entry.grid(row=5, column=1, padx=0, pady=3, sticky="w")
+        mari_user_id_entry.grid(row=3, column=1, padx=0, pady=3, sticky="w")
         mari_user_id_entry.bind("<FocusOut>", lambda event: self.save_config())
 
         mari_label = ttk.Label(frame, text="")
-        mari_label.grid(row=5, column=2, padx=5, pady=3, sticky="w")
+        mari_label.grid(row=3, column=2, padx=5, pady=3, sticky="w")
 
         # Ping Jester
         self.ping_jester_var = ttk.BooleanVar(value=self.config.get("ping_jester", False))
         ping_jester_check = ttk.Checkbutton(
             frame, text="Ping if Jester found? (Custom Ping UserID/RoleID: &roleid)",
             variable=self.ping_jester_var, command=self.save_config)
-        ping_jester_check.grid(row=6, column=0, padx=5, pady=3, sticky="w")
+        ping_jester_check.grid(row=4, column=0, padx=5, pady=3, sticky="w")
 
         self.jester_user_id_var = ttk.StringVar(value=self.config.get("jester_user_id", ""))
         self.detect_merchant_no_mt_var = ttk.BooleanVar(value=self.config.get("detect_merchant_no_mt", True))
         jester_user_id_entry = ttk.Entry(frame, textvariable=self.jester_user_id_var, width=15)
-        jester_user_id_entry.grid(row=6, column=1, padx=0, pady=3, sticky="w")
+        jester_user_id_entry.grid(row=4, column=1, padx=0, pady=3, sticky="w")
         jester_user_id_entry.bind("<FocusOut>", lambda event: self.save_config())
 
         merchant_no_mt_check = ttk.Checkbutton(
             frame, text="Merchant detection without Merchant Teleporter gamepass.",
             variable=self.detect_merchant_no_mt_var, command=self.save_config
         )
-        merchant_no_mt_check.grid(row=8, column=0, padx=5, pady=3, sticky="w")
+        merchant_no_mt_check.grid(row=6, column=0, padx=5, pady=3, sticky="w")
 
         jester_label = ttk.Label(frame, text="")
-        jester_label.grid(row=6, column=2, padx=5, pady=3, sticky="w")
+        jester_label.grid(row=4, column=2, padx=5, pady=3, sticky="w")
 
         # Required Package Frame
         package_frame = ttk.LabelFrame(frame, text="Required Package For Auto Merchant")
-        package_frame.grid(row=7, column=0, padx=5, pady=5, sticky="nsew")
+        package_frame.grid(row=5, column=0, padx=5, pady=5, sticky="nsew")
 
         # Tesseract OCR Status
         ocr_status = self.check_tesseract_ocr()
@@ -4035,7 +2922,8 @@ class BiomePresence():
         images_dir = os.path.join(current_dir, "images")
         credit_paths = [
             os.path.join(images_dir, "tea.png"),
-            os.path.join(images_dir, "devteam.png"),
+            os.path.join(images_dir, "vapure.png"),
+            os.path.join(images_dir, "finn.jpg"),
             os.path.join(images_dir, "maxstellar.png")
         ]
 
@@ -4055,7 +2943,8 @@ class BiomePresence():
         credits_frame_content.pack(pady=20, fill='both', expand=True)
 
         noteab_image = load_image("tea.png", (85, 85))
-        dev_image = load_image("devteam.png", (70, 70))
+        vapure_image = load_image("vapure.png", (70, 70))
+        finn_image = load_image("finn.jpg", (70, 70))
         maxstellar_image = load_image("maxstellar.png", (85, 85))
 
         noteab_frame = ttk.Frame(credits_frame_content, borderwidth=2, relief="solid")
@@ -4079,10 +2968,14 @@ class BiomePresence():
         small_images_frame = ttk.Frame(top_inner)
         small_images_frame.grid(row=0, column=1, sticky='n')
 
-        if dev_image:
-            vlab = ttk.Label(small_images_frame, image=dev_image)
+        if vapure_image:
+            vlab = ttk.Label(small_images_frame, image=vapure_image)
             vlab.grid(row=0, column=0, padx=2, pady=0)
-            small_images_frame._vap = dev_image
+            small_images_frame._vap = vapure_image
+        if finn_image:
+            flab = ttk.Label(small_images_frame, image=finn_image)
+            flab.grid(row=0, column=1, padx=2, pady=0)
+            small_images_frame._fin = finn_image
 
         ttk.Label(noteab_frame, text="Developers:").pack(anchor="center")
 
@@ -4095,13 +2988,9 @@ class BiomePresence():
         dev_vap.grid(row=0, column=1, sticky='w')
         dev_vap.bind("<Button-1>", lambda e: webbrowser.open_new("https://github.com/xVapure"))
 
-        dev_max = ttk.Label(devs_frame, text='- Maxstellar', foreground="#03cafc", cursor="hand2")
-        dev_max.grid(row=1, column=1, sticky='w')
-        dev_max.bind("<Button-1>", lambda e: webbrowser.open_new("https://www.youtube.com/@maxstellar_"))
-
-        dev_til = ttk.Label(devs_frame, text='- Til/Comet', foreground="#03cafc", cursor="hand2")
-        dev_til.grid(row=2, column=1, sticky='w')
-        dev_til.bind("<Button-1>", lambda e: webbrowser.open_new("https://github.com/sleepytil"))
+        dev_finn = ttk.Label(devs_frame, text='- Finnerich', foreground="#03cafc", cursor="hand2")
+        dev_finn.grid(row=1, column=1, sticky='w')
+        dev_finn.bind("<Button-1>", lambda e: webbrowser.open_new("https://www.youtube.com/@Finnerich"))
         discord_label = ttk.Label(noteab_frame, text="""Join the Coteab Discord server!!!""", foreground="royalblue", cursor="hand2")
         discord_label.configure(font=('Segoe UI', 9, 'underline'))
         discord_label.pack()
@@ -4109,7 +2998,7 @@ class BiomePresence():
 
         github_label = ttk.Label(noteab_frame, text="""GitHub: Coteab Macro!""", foreground="#03cafc", cursor="hand2")
         github_label.pack()
-        github_label.bind("<Button-1>", lambda e: webbrowser.open_new("https://github.com/cresqnt-sys/Noteab-Macro-Unrestricted"))
+        github_label.bind("<Button-1>", lambda e: webbrowser.open_new("https://github.com/xVapure/Noteab-Macro"))
 
         if maxstellar_image:
             ttk.Label(maxstellar_frame, image=maxstellar_image).pack(pady=5)
@@ -4138,9 +3027,8 @@ class BiomePresence():
             "Vexthecoder - Thank you for the icons <3",
             "Cresqnt, Baz & the Scope Team - Anti-AFK inspiration.",
             "ManasAarohi - For teaching me how FFlag works",
-            "rnd.xy, imsomeone - For doing external works that I was too lazy to do tysm.",
-            "Finnerinch - Former developer.",
-            """All the testers that made the update possible with as less flaws as possible. Notably: "imsomeone", "cheshington", "tilesdrop", "kira_drago2", "gummyballer", "retelteel", "mightbeanormalguest", "gonebon" and others."""
+            "rnd.xy (or Randy) - For doing external works that I was too lazy to do tysm.",
+            """All the testers that made the update possible with as less flaws as possible. Notably: "ethan03228', "rnd.xy", "tilesdrop", "alonexii", "_bread.0", "lordelmothewise", "someone75", "ka_leb123", "cheshington", "urmyboooo", "kurugurui"."""
         ]
 
         credits_text.config(state='normal')
@@ -4420,15 +3308,8 @@ class BiomePresence():
                 thread.start()
             self.perform_anti_afk_action()
 
-            self.set_title_threadsafe(f"""Coteab Macro {current_ver} (Running)""")
+            self.set_title_threadsafe("""Coteab Macro v2.0.0-beta3 (Running)""")
             self.send_webhook_status("Macro started!", color=0x64ff5e)
-            try:
-                if getattr(self, "remote_access_var", None) and self.remote_access_var.get():
-                    token = self.remote_bot_token_var.get().strip() if hasattr(self, "remote_bot_token_var") else ""
-                    if token:
-                        self.start_remote_bot()
-            except Exception:
-                pass
             print("Biome detection started.")
 
     def stop_detection(self):
@@ -4457,11 +3338,8 @@ class BiomePresence():
             self.saved_session += elapsed_time
             self.start_time = None
             self.stop_sent = True
-            self.set_title_threadsafe(f"Coteab Macro {current_ver} (Stopped)")
-            try:
-                self.stop_remote_bot()
-            except Exception:
-                pass
+            self.set_title_threadsafe("Coteab Macro v2.0.0-beta3 (Stopped)")
+
             self.send_macro_summary(last24h_seconds)
             print("closed", self.current_session)
             self.save_config()
@@ -4532,7 +3410,7 @@ class BiomePresence():
             return file.readlines()
 
     def load_auras_json(self):
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/auras.json"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/auras.json"
         try:
             r = requests.get(url, timeout=10)
             r.raise_for_status()
@@ -4762,7 +3640,7 @@ class BiomePresence():
 
                 message_type = self.config["biome_notifier"].get(biome, "None")
 
-                if biome in ["GLITCHED", "DREAMSPACE", "CYBERSPACE"]:
+                if biome in ["GLITCHED", "DREAMSPACE"]:
                     message_type = "Ping"
                     if self.config.get("record_rare_biome", False):
                         self.trigger_biome_record()
@@ -4849,7 +3727,7 @@ class BiomePresence():
                                 self.terminate_roblox_processes()
                                 self.send_webhook_status(f"Reconnecting to your server. hold on bro", color=0xffff00)
                                 self.set_title_threadsafe(
-                                    f"""Coteab Macro {current_ver} (Reconnecting)""")
+                                    """Coteab Macro v2.0.0-beta3 (Reconnecting)""")
                                 try:
                                     os.startfile(roblox_deep_link)
                                 except Exception:
@@ -4893,7 +3771,7 @@ class BiomePresence():
                 self.pause_reason = reason
             self.reconnecting_state = True
             self.set_title_threadsafe(
-                f"""Coteab Macro {current_ver} (Roblox Disconnected :c )""")
+                """Coteab Macro v2.0.0-beta3 (Roblox Disconnected :c )""")
             if reason and not getattr(self, 'has_sent_disconnected_message', False):
                 try:
                     self.send_webhook_status(reason, color=0xff0000)
@@ -4919,7 +3797,7 @@ class BiomePresence():
                     self.start_time = datetime.now()
             self.reconnecting_state = False
             self.has_sent_disconnected_message = False
-            self.set_title_threadsafe(f"""Coteab Macro {current_ver} (Running)""")
+            self.set_title_threadsafe("""Coteab Macro v2.0.0-beta3 (Running)""")
             self.save_config()
         except Exception as e:
             self.error_logging(e, "_resume_timer_after_reconnect")
@@ -5147,7 +4025,7 @@ class BiomePresence():
     def reconnect_check_start_button(self):
         try:
             self.set_title_threadsafe(
-                f"""Coteab Macro {current_ver} (Reconnecting - In Main Menu)""")
+                """Coteab Macro v2.0.0-beta3 (Reconnecting - In Main Menu)""")
             reconnect_start_button = self.config.get("reconnect_start_button", [954, 876])
             max_clicks = 25
             failed_clicks = 0
@@ -5167,7 +4045,7 @@ class BiomePresence():
                     self.send_webhook_status("Clicked 'Start' button and you are in the game now!!", color=0x4aff65)
                     print("Game has started, exiting click loop.")
                     self.detection_running = True
-                    self.set_title_threadsafe(f"""Coteab Macro {current_ver} (Running)""")
+                    self.set_title_threadsafe("""Coteab Macro v2.0.0-beta3 (Running)""")
                     return True  # yay joins!!
 
                 print("Still in Main Menu, clicking again...")
@@ -5236,20 +4114,20 @@ class BiomePresence():
             mt_cooldown = timedelta(minutes=1)
 
         try:
-            self._action_scheduler.enqueue_action(self.perform_periodic_aura_screenshot_sync, name="periodical:aura", priority=2)
+            self.perform_periodic_aura_screenshot_sync()
         except Exception:
             pass
 
         try:
-            self._action_scheduler.enqueue_action(self.perform_periodic_inventory_screenshot_sync, name="periodical:inventory", priority=3)
+            self.perform_periodic_inventory_screenshot_sync()
         except Exception:
             pass
 
         if self.mt_var.get() and datetime.now() - self.last_mt_time >= mt_cooldown and not getattr(self,
-                                                                                                    '_br_sc_running',
-                                                                                                    False) and not getattr(
-                        self, '_mt_running', False) and not getattr(self, '_remote_running', False) and datetime.now() >= getattr(self, '_cancel_next_actions_until',
-                                                                                datetime.min):
+                                                                                                '_br_sc_running',
+                                                                                                False) and not getattr(
+                self, '_mt_running', False) and datetime.now() >= getattr(self, '_cancel_next_actions_until',
+                                                                        datetime.min):
             self.use_merchant_teleporter()
             self.last_mt_time = datetime.now()
 
@@ -5259,11 +4137,11 @@ class BiomePresence():
             sc_cooldown = timedelta(minutes=20)
 
         if self.sc_var.get() and datetime.now() - self.last_sc_time >= sc_cooldown and not getattr(self,
-                                                                                                        '_merchant_pending_from_logs',
-                                                                                                        False) and not getattr(
-                        self, '_mt_running', False) and not getattr(self, '_remote_running', False) and not self.on_auto_merchant_state and datetime.now() >= getattr(self,
-                                                                                                                    '_cancel_next_actions_until',
-                                                                                                                    datetime.min):
+                                                                                                   '_merchant_pending_from_logs',
+                                                                                                   False) and not getattr(
+                self, '_mt_running', False) and not self.on_auto_merchant_state and datetime.now() >= getattr(self,
+                                                                                                              '_cancel_next_actions_until',
+                                                                                                              datetime.min):
             self.use_br_sc('strange controller')
             self.last_sc_time = datetime.now()
 
@@ -5282,7 +4160,6 @@ class BiomePresence():
             self.last_br_time = datetime.now()
 
     def perform_periodic_aura_screenshot_sync(self):
-        inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
         try:
             if not getattr(self, "periodical_aura_var", None) or not self.periodical_aura_var.get():
                 return
@@ -5296,17 +4173,12 @@ class BiomePresence():
                 return
             self.activate_roblox_window()
             aura_menu = self.config.get("aura_menu", [0, 0])
-            search_bar = self.config.get("search_bar", [855, 358])
             if aura_menu and aura_menu[0]:
                 try:
                     autoit.mouse_click("left", aura_menu[0], aura_menu[1], 1, speed=3)
-                    time.sleep(0.67)
-                    autoit.mouse_click("left", search_bar[0], search_bar[1], 1, speed=3)
                 except Exception:
                     try:
                         self.Global_MouseClick(aura_menu[0], aura_menu[1])
-                        time.sleep(0.67)
-                        self.Global_MouseClick(search_bar[0], search_bar[1])
                     except Exception:
                         pass
                 time.sleep(0.67)
@@ -5317,8 +4189,6 @@ class BiomePresence():
                     img.save(filename)
                     self.send_aura_screenshot_webhook(filename)
                     self.last_aura_screenshot_time = datetime.now()
-                    autoit.mouse_click("left", inventory_close_button[0], inventory_close_button[1], 1, speed=3)
-                    time.sleep(0.67)
                 except Exception as e:
                     self.error_logging(e, "Error taking/sending aura screenshot")
         except Exception as e:
@@ -5398,7 +4268,7 @@ class BiomePresence():
             embed = {
                 "description": f"> ## Periodical Inventory Screenshot",
                 "color": 0xffffff,
-                "footer": {"text": f"Coteab Macro {current_ver}", "icon_url": icon_url},
+                "footer": {"text": "Coteab Macro v2.0.0-beta3", "icon_url": icon_url},
                 "timestamp": current_utc_time
             }
             for webhook_url in urls:
@@ -5430,7 +4300,7 @@ class BiomePresence():
             embed = {
                 "description": f"> ## Periodical Aura Screenshot",
                 "color": 0xffffff,
-                "footer": {"text": f"Coteab Macro {current_ver}", "icon_url": icon_url},
+                "footer": {"text": "Coteab Macro v2.0.0-beta3", "icon_url": icon_url},
                 "timestamp": current_utc_time
             }
             for webhook_url in urls:
@@ -5452,17 +4322,8 @@ class BiomePresence():
     def Global_MouseClick(self, x, y, click=1):
         time.sleep(0.335)
         autoit.mouse_click("left", x, y, click, speed=3)
-        
-    def use_br_sc(self, item_name):
-        try:
-            self._action_scheduler.enqueue_action(lambda: self._use_br_sc_impl(item_name), name=f"use_br_sc:{item_name}", priority=6)
-        except Exception:
-            try:
-                self._use_br_sc_impl(item_name)
-            except Exception:
-                pass
 
-    def _use_br_sc_impl(self, item_name):
+    def use_br_sc(self, item_name):
         self._br_sc_running = True
         try:
             if not self.detection_running or self.reconnecting_state or self.auto_pop_state or self.on_auto_merchant_state or self.config.get(
@@ -5509,7 +4370,9 @@ class BiomePresence():
             time.sleep(0.2 + inventory_click_delay)
             if not self.detection_running or self.reconnecting_state or self.auto_pop_state or self.on_auto_merchant_state or self.config.get(
                 "enable_auto_craft") or self.current_biome == "GLITCHED": return
-            autoit.send(item_name)
+            pyperclip.copy(item_name)
+            time.sleep(0.15 + inventory_click_delay)
+            autoit.send("^v")
             time.sleep(0.4 + inventory_click_delay)
             self.Global_MouseClick(first_item_slot[0], first_item_slot[1])
             time.sleep(0.4 + inventory_click_delay)
@@ -5561,15 +4424,6 @@ class BiomePresence():
                     self.error_logging(e, "Failed to use merchant teleporter after BR/SC")
 
     def use_merchant_teleporter(self):
-        try:
-            self._action_scheduler.enqueue_action(self._merchant_teleporter_impl, name="merchant_tele", priority=5)
-        except Exception:
-            try:
-                self._merchant_teleporter_impl()
-            except Exception:
-                pass
-
-    def _merchant_teleporter_impl(self):
         if getattr(self, '_br_sc_running', False): return
         self._mt_running = True
         try:
@@ -5612,7 +4466,9 @@ class BiomePresence():
             time.sleep(0.27 + inventory_click_delay)
             if not self.detection_running or self.reconnecting_state or self.auto_pop_state or self.on_auto_merchant_state or self.config.get(
                 "enable_auto_craft") or self.current_biome == "GLITCHED": return
-            autoit.send("teleport")
+            pyperclip.copy("teleport")
+            time.sleep(0.15 + inventory_click_delay)
+            autoit.send("^v")
             time.sleep(0.4 + inventory_click_delay)
             self.Global_MouseClick(first_item_slot[0], first_item_slot[1])
             time.sleep(0.4 + inventory_click_delay)
@@ -5671,7 +4527,9 @@ class BiomePresence():
                     time.sleep(0.15 + inventory_click_delay)
                     self.Global_MouseClick(search_bar[0], search_bar[1])
                     time.sleep(0.15 + inventory_click_delay)
-                    autoit.send("crack")
+                    pyperclip.copy("crack")
+                    time.sleep(0.15 + inventory_click_delay)
+                    autoit.send("^v")
                     time.sleep(0.4 + inventory_click_delay)
                     self.Global_MouseClick(first_item_slot[0], first_item_slot[1])
                     time.sleep(0.4 + inventory_click_delay)
@@ -5764,8 +4622,7 @@ class BiomePresence():
                     merchant_name = "Mari"
                     print("[Merchant Detection]: Mari name found!")
                     break
-                elif any(name in merchant_name_text for name in
-                         ["Jester", "Dester", "Jostor", "Jestor", "Joster", "Destor", "Doster", "Dostor", "jester", "dester"]):
+                elif "Jester" in merchant_name_text:
                     merchant_name = "Jester"
                     print("[Merchant Detection]: Jester name found!")
                     break
@@ -5873,9 +4730,9 @@ class BiomePresence():
         current_utc_time = str(current_utc_time)
         icon_url = "https://i.postimg.cc/rsXpGncL/Noteab-Biome-Tracker.png"
         content = ""
-        if event_type == "start" and biome in ["GLITCHED", "DREAMSPACE", "CYBERSPACE"]:
+        if event_type == "start" and biome in ["GLITCHED", "DREAMSPACE"]:
             content = "@everyone"
-        private_server_link = self.config.get("private_server_link").replace("\n", "")
+        private_server_link = self.config.get("private_server_link")
         if private_server_link == "":
             description = f"> ## Biome Started - {biome} \nNo link provided (ManasAarohi ate the link blame him)" if event_type == "start" else f"> ### Biome Ended - {biome}"
         else:
@@ -5884,7 +4741,7 @@ class BiomePresence():
             "description": description,
             "color": biome_color,
             "footer": {
-                "text": f"""Coteab Macro {current_ver}""",
+                "text": """Coteab Macro v2.0.0-beta3""",
                 "icon_url": icon_url
             },
             "timestamp": current_utc_time
@@ -5926,7 +4783,7 @@ class BiomePresence():
             ping_id = ""
             ping_enabled = False
         content = f"<@{ping_id}>" if (source == 'logs', 'ocr' and ping_enabled and ping_id) else ""
-        ps_link = self.config.get("private_server_link", "").replace("\n", "")
+        ps_link = self.config.get("private_server_link", "")
         icon_url = "https://i.postimg.cc/rsXpGncL/Noteab-Biome-Tracker.png"
         current_utc_time = datetime.now(timezone.utc)
         current_utc_time.replace(microsecond=0).isoformat(timespec='seconds') + 'Z'
@@ -5940,7 +4797,7 @@ class BiomePresence():
                 {"name": "Detection Source", "value": source.upper()}
             ],
             "footer": {
-                "text": f"""Coteab Macro {current_ver}""",
+                "text": """Coteab Macro v2.0.0-beta3""",
                 "icon_url": icon_url
             }
         }
@@ -6025,7 +4882,7 @@ class BiomePresence():
             "color": 000000,
             "thumbnail": {"url": eden_image},
             "footer": {
-                "text": f"""Coteab Macro {current_ver}""",
+                "text": """Coteab Macro v2.0.0-beta3""",
                 "icon_url": icon_url
             }
         }
@@ -6069,7 +4926,7 @@ class BiomePresence():
             "description": description,
             "color": color,
             "footer": {
-                "text": f"""Coteab Macro {current_ver}""",
+                "text": """Coteab Macro v2.0.0-beta3""",
                 "icon_url": icon_url
             },
             "timestamp": current_utc_time
@@ -6126,7 +4983,7 @@ class BiomePresence():
                 "color": embed_color,
                 "timestamp": current_utc_time,
                 "footer": {
-                    "text": f"Coteab Macro {current_ver}",
+                    "text": "Coteab Macro v2.0.0-beta3",
                     "icon_url": icon_url
                 },
                 "fields": [
@@ -6163,7 +5020,7 @@ class BiomePresence():
                 "color": 0xff0000,
                 "timestamp": current_utc_time,
                 "footer": {
-                    "text": f"Coteab Macro {current_ver}",
+                    "text": "Coteab Macro v2.0.0-beta3",
                     "icon_url": icon_url
                 },
                 "fields": [
@@ -6456,15 +5313,6 @@ class BiomePresence():
 
     def auto_pop_buffs(self):
         try:
-            self._action_scheduler.enqueue_action(self._auto_pop_buffs_impl, name="auto_pop_buffs", priority=0)
-        except Exception:
-            try:
-                self._auto_pop_buffs_impl()
-            except Exception:
-                pass
-
-    def _auto_pop_buffs_impl(self):
-        try:
             inventory_click_delay = int(self.config.get("inventory_click_delay", "0")) / 1000.0
 
             # Priority list for potions
@@ -6599,7 +5447,7 @@ finally:
                     bp.start_time = None
                     bp.detection_running = False
                     bp.stop_sent = True
-                    bp.set_title_threadsafe(f"""Coteab Macro {current_ver} (Stopped)""")
+                    bp.set_title_threadsafe("""Coteab Macro v2.0.0-beta3 (Stopped)""")
                     bp.send_macro_summary(last24h_seconds)
                     bp.save_config()
 
@@ -6615,5 +5463,3 @@ finally:
         pass
     finally:
         keyboard.unhook_all()
-
-print("vamp") # vamp said he wants to say hi     

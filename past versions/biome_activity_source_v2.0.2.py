@@ -12,7 +12,7 @@ import difflib
 import json, requests, time, os, threading, re, webbrowser, random, keyboard, pyautogui, pytesseract, autoit, psutil, \
     locale, win32gui, win32process, win32con, ctypes, queue, mouse, sys
 
-current_ver = "v2.0.3"
+current_ver = "v2.0.2"
 
 def apply_fast_flags(version=None, force=False):
     config_paths = [
@@ -266,7 +266,6 @@ class ActionScheduler:
         self._worker_thread = threading.Thread(target=self._worker, name=worker_name, daemon=True)
         self._worker_thread.start()
         self._action_lock = threading.RLock()
-        self._action_active = threading.Event()
 
     def enqueue_action(self, fn, name=None, priority=5, block=False, timeout=None):
         idx = next(self._counter)
@@ -286,37 +285,32 @@ class ActionScheduler:
     def _worker(self):
         while self._running:
             try:
+                priority, idx, name, fn = self._pq.get(timeout=0.7)
+            except Exception:
+                continue
+            try:
+                acquired = False
                 try:
-                    priority, idx, name, fn = self._pq.get(timeout=0.7)
+                    self._action_lock.acquire()
+                    acquired = True
                 except Exception:
-                    continue
-
-                self._action_active.set()
-                self._action_lock.acquire()
+                    acquired = False
                 try:
                     try:
                         fn()
                     except Exception:
                         try:
-                            self.owner.error_logging(
-                                sys.exc_info(),
-                                f"Error executing scheduled action {name}"
-                            )
+                            self.owner.error_logging(sys.exc_info(), f"Error executing scheduled action {name}")
                         except Exception:
                             pass
                 finally:
-                    try:
-                        self._action_lock.release()
-                    except Exception:
-                        pass
-                    self._action_active.clear()
-
+                    if acquired:
+                        try:
+                            self._action_lock.release()
+                        except Exception:
+                            pass
             except Exception:
-                self._action_active.clear()
-                try:
-                    self._action_lock.release()
-                except Exception:
-                    pass
+                pass
 
     def stop(self):
         self._running = False
@@ -453,8 +447,8 @@ class BiomePresence():
         return []
 
     def load_biome_data(self):
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/biomes_data.json"
-        eventUrl = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/active_events.json"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/biomes_data.json"
+        eventUrl = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/main/active_events.json"
 
         default_biome_data = {
             "NORMAL": {
@@ -548,7 +542,7 @@ class BiomePresence():
         return data
 
     def load_notice_tab(self):
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/noticetabcontents.txt"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/noticetabcontents.txt"
         data = ""
         try:
             r = requests.get(url, timeout=10)
@@ -1075,7 +1069,7 @@ class BiomePresence():
         if dont_ask_again: return
 
         try:
-            response = requests.get("https://api.github.com/repos/cresqnt-sys/Noteab-Macro-Unrestricted/releases/latest")
+            response = requests.get("https://api.github.com/repos/xVapure/Noteab-Macro/releases/latest")
             response.raise_for_status()
             latest_release = response.json()
             latest_version = latest_release['tag_name']
@@ -1756,7 +1750,7 @@ class BiomePresence():
                                 pass
 
                     try:
-                        self._action_scheduler.enqueue_action(remote_rejoin_action, name="remote:rejoin", priority=1)
+                        self._action_scheduler.enqueue_action(remote_rejoin_action, name="remote:rejoin", priority=2)
                     except Exception:
                         try:
                             time.sleep(0.35)
@@ -1806,7 +1800,7 @@ class BiomePresence():
                                     pass
 
                         try:
-                            self._action_scheduler.enqueue_action(_screenshot_action, name="remote:screenshot", priority=0)
+                            self._action_scheduler.enqueue_action(_screenshot_action, name="remote:screenshot", priority=8)
                         except Exception:
                             try:
                                 time.sleep(0.35)
@@ -1835,7 +1829,7 @@ class BiomePresence():
                                     pass
 
                         try:
-                            self._action_scheduler.enqueue_action(_inv_action, name="remote:screenshot:inventory", priority=3)
+                            self._action_scheduler.enqueue_action(_inv_action, name="remote:screenshot:inventory", priority=7)
                         except Exception:
                             try:
                                 time.sleep(0.35)
@@ -1864,7 +1858,7 @@ class BiomePresence():
                                     pass
 
                         try:
-                            self._action_scheduler.enqueue_action(_aura_action, name="remote:screenshot:aura", priority=2)
+                            self._action_scheduler.enqueue_action(_aura_action, name="remote:screenshot:aura", priority=7)
                         except Exception:
                             try:
                                 time.sleep(0.35)
@@ -1907,7 +1901,7 @@ class BiomePresence():
                             pass
 
                 try:
-                    self._action_scheduler.enqueue_action(_remote_action, name=f"remote:{item_name}", priority=1)
+                    self._action_scheduler.enqueue_action(_remote_action, name=f"remote:{item_name}", priority=6)
                 except Exception:
                     try:
                         time.sleep(0.35)
@@ -1982,13 +1976,9 @@ class BiomePresence():
                 return
             self.activate_roblox_window()
             aura_menu = self.config.get("aura_menu", [0, 0])
-            search_bar = self.config.get("search_bar", [855, 358])
-            inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
             if aura_menu and aura_menu[0]:
                 try:
                     autoit.mouse_click("left", aura_menu[0], aura_menu[1], 1, speed=3)
-                    time.sleep(0.67)
-                    autoit.mouse_click("left", search_bar[0], search_bar[1], 1, speed=3)
                 except Exception:
                     try:
                         self.Global_MouseClick(aura_menu[0], aura_menu[1])
@@ -2002,8 +1992,6 @@ class BiomePresence():
                     img.save(filename)
                     self.send_aura_screenshot_webhook(filename)
                     self.last_aura_screenshot_time = datetime.now()
-                    autoit.mouse_click("left", inventory_close_button[0], inventory_close_button[1], 1, speed=3)
-                    time.sleep(0.67)
                 except Exception as e:
                     self.error_logging(e, "Error taking/sending forced aura screenshot")
         except Exception as e:
@@ -2132,7 +2120,7 @@ class BiomePresence():
         hall.pack(fill='both', expand=True, padx=5, pady=5)
         txt = ttk.Text(hall, height=14, wrap="word")
         txt.pack(fill="both", expand=True, padx=8, pady=8)
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/appreciation_list.txt"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/appreciation_list.txt"
         try:
             r = requests.get(url, timeout=10)
             r.raise_for_status()
@@ -2560,7 +2548,7 @@ class BiomePresence():
     def create_notice_tab(self, frame):
         txt = ttk.Text(frame, height=14, wrap="word")
         txt.pack(fill="both", expand=True, padx=5, pady=(5, 90))
-        notice_url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/noticetabcontents.txt"
+        notice_url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/noticetabcontents.txt"
         try:
             r = requests.get(notice_url, timeout=10)
             r.raise_for_status()
@@ -2589,12 +2577,12 @@ class BiomePresence():
         update_label.pack(side="top", fill="x", anchor="w", padx=5)
 
         def _open_releases(_=None):
-            webbrowser.open_new("https://github.com/cresqnt-sys/Noteab-Macro-Unrestricted/releases/latest")
+            webbrowser.open_new("https://github.com/xVapure/Noteab-Macro/releases/latest")
 
         def _check_latest():
             current_version = current_ver
             try:
-                response = requests.get("https://api.github.com/repos/cresqnt-sys/Noteab-Macro-Unrestricted/releases/latest", timeout=10)
+                response = requests.get("https://api.github.com/repos/xVapure/Noteab-Macro/releases/latest", timeout=10)
                 response.raise_for_status()
                 latest_release = response.json()
                 latest_version = latest_release.get("tag_name") or latest_release.get("name") or ""
@@ -2677,6 +2665,46 @@ class BiomePresence():
         sc_duration_entry = ttk.Entry(hp2_frame, textvariable=self.sc_duration_var, width=10)
         sc_duration_entry.grid(row=3, column=2, padx=5)
         sc_duration_entry.bind("<FocusOut>", lambda event: self.save_config())
+
+        # Merchant Teleporter
+        self.mt_var = ttk.BooleanVar(value=self.config.get("merchant_teleporter", False))
+        mt_check = ttk.Checkbutton(
+            hp2_frame,
+            text="Merchant Teleporter (Auto Merchant)",
+            variable=self.mt_var,
+            command=self.save_config
+        )
+        mt_check.grid(row=4, column=0, padx=5, sticky="w")
+
+        ttk.Label(hp2_frame, text="Usage Duration (minutes):").grid(row=4, column=1, padx=5)
+        self.mt_duration_var = ttk.StringVar(value=self.config.get("mt_duration", "1"))
+        mt_duration_entry = ttk.Entry(hp2_frame, textvariable=self.mt_duration_var, width=10)
+        mt_duration_entry.grid(row=4, column=2, padx=5)
+        mt_duration_entry.bind("<FocusOut>", lambda event: self.save_config())
+
+        self.auto_merchant_in_limbo_var = ttk.BooleanVar(value=self.config.get("auto_merchant_in_limbo", False))
+        self.auto_merchant_in_limbo_check = ttk.Checkbutton(
+            hp2_frame,
+            text="Auto Merchant in Limbo",
+            variable=self.auto_merchant_in_limbo_var,
+            command=self.save_config
+        )
+        def _update_auto_merchant_in_limbo_visibility(*args):
+            if self.mt_var.get():
+                self.auto_merchant_in_limbo_check.grid(row=5, column=0, padx=5, sticky="w")
+            else:
+                try:
+                    self.auto_merchant_in_limbo_check.grid_remove()
+                except Exception:
+                    pass
+        _update_auto_merchant_in_limbo_visibility()
+        try:
+            self.mt_var.trace_add('write', _update_auto_merchant_in_limbo_visibility)
+        except Exception:
+            try:
+                self.mt_var.trace('w', _update_auto_merchant_in_limbo_visibility)
+            except Exception:
+                pass
 
         # Auto Reconnect
         self.auto_reconnect_var = ttk.BooleanVar(value=self.config.get("auto_reconnect", False))
@@ -2870,7 +2898,7 @@ class BiomePresence():
 
     def perform_quest_claim_sequence_sync(self):
         try:
-            self._action_scheduler.enqueue_action(self._perform_quest_claim_sequence_impl, name="quest_claim", priority=5)
+            self._action_scheduler.enqueue_action(self._perform_quest_claim_sequence_impl, name="quest_claim", priority=2)
         except Exception:
             try:
                 self._perform_quest_claim_sequence_impl()
@@ -3078,11 +3106,11 @@ class BiomePresence():
                 with self.lock:
                     if not self.detection_running:
                         break
-                    self._action_scheduler.enqueue_action(self.perform_periodic_aura_screenshot_sync, name="periodical:aura", priority=2)
+                    self.perform_periodic_aura_screenshot_sync()
                     time.sleep(0.5)
-                    self._action_scheduler.enqueue_action(self.perform_periodic_inventory_screenshot_sync, name="periodical:inventory", priority=3)
+                    self.perform_periodic_inventory_screenshot_sync()
                     time.sleep(0.5)
-                    self._action_scheduler.enqueue_action(self.perform_quest_claim_sequence_sync, name="periodic:quest_claim", priority=4)
+                    self.perform_quest_claim_sequence_sync()
                     last_claim_time = datetime.now()
             except Exception as e:
                 self.error_logging(e, "Error in quest_claim_loop")
@@ -3654,87 +3682,46 @@ class BiomePresence():
         merchant_extra_slot_entry.grid(row=2, column=1, padx=0, pady=3, sticky="w")
         merchant_extra_slot_entry.bind("<FocusOut>", lambda event: self.save_config())
 
-        self.mt_var = ttk.BooleanVar(value=self.config.get("merchant_teleporter", False))
-        mt_check = ttk.Checkbutton(
-            frame,
-            text="Enable Auto Merchant (requires merchant teleporter)",
-            variable=self.mt_var,
-            command=self.save_config
-        )
-        mt_check.grid(row=3, column=0, padx=5, pady=3, sticky="w")
-
-        ttk.Label(frame, text="Usage Duration (minutes):").grid(row=3, column=1, padx=5, sticky="w")
-        self.mt_duration_var = ttk.StringVar(value=self.config.get("mt_duration", "1"))
-        mt_duration_entry = ttk.Entry(frame, textvariable=self.mt_duration_var, width=10)
-        mt_duration_entry.grid(row=3, column=2, padx=5, sticky="w")
-        mt_duration_entry.bind("<FocusOut>", lambda event: self.save_config())
-
-        self.auto_merchant_in_limbo_var = ttk.BooleanVar(value=self.config.get("auto_merchant_in_limbo", False))
-        self.auto_merchant_in_limbo_check = ttk.Checkbutton(
-            frame,
-            text="Auto Merchant in Limbo",
-            variable=self.auto_merchant_in_limbo_var,
-            command=self.save_config
-        )
-
-        def update_auto_merchant_in_limbo_visibility(*args):
-            if self.mt_var.get():
-                self.auto_merchant_in_limbo_check.grid(row=4, column=0, padx=5, pady=3, sticky="w")
-            else:
-                try:
-                    self.auto_merchant_in_limbo_check.grid_remove()
-                except Exception:
-                    pass
-
-        update_auto_merchant_in_limbo_visibility()
-        try:
-            self.mt_var.trace_add('write', update_auto_merchant_in_limbo_visibility)
-        except Exception:
-            try:
-                self.mt_var.trace('w', update_auto_merchant_in_limbo_visibility)
-            except Exception:
-                pass
-
         # Ping Mari
         self.ping_mari_var = ttk.BooleanVar(value=self.config.get("ping_mari", False))
         ping_mari_check = ttk.Checkbutton(
             frame, text="Ping if Mari found? (Custom Ping UserID/RoleID: &roleid)",
             variable=self.ping_mari_var, command=self.save_config)
-        ping_mari_check.grid(row=5, column=0, padx=5, pady=3, sticky="w")
+        ping_mari_check.grid(row=3, column=0, padx=5, pady=3, sticky="w")
 
         self.mari_user_id_var = ttk.StringVar(value=self.config.get("mari_user_id", ""))
         mari_user_id_entry = ttk.Entry(frame, textvariable=self.mari_user_id_var, width=15)
-        mari_user_id_entry.grid(row=5, column=1, padx=0, pady=3, sticky="w")
+        mari_user_id_entry.grid(row=3, column=1, padx=0, pady=3, sticky="w")
         mari_user_id_entry.bind("<FocusOut>", lambda event: self.save_config())
 
         mari_label = ttk.Label(frame, text="")
-        mari_label.grid(row=5, column=2, padx=5, pady=3, sticky="w")
+        mari_label.grid(row=3, column=2, padx=5, pady=3, sticky="w")
 
         # Ping Jester
         self.ping_jester_var = ttk.BooleanVar(value=self.config.get("ping_jester", False))
         ping_jester_check = ttk.Checkbutton(
             frame, text="Ping if Jester found? (Custom Ping UserID/RoleID: &roleid)",
             variable=self.ping_jester_var, command=self.save_config)
-        ping_jester_check.grid(row=6, column=0, padx=5, pady=3, sticky="w")
+        ping_jester_check.grid(row=4, column=0, padx=5, pady=3, sticky="w")
 
         self.jester_user_id_var = ttk.StringVar(value=self.config.get("jester_user_id", ""))
         self.detect_merchant_no_mt_var = ttk.BooleanVar(value=self.config.get("detect_merchant_no_mt", True))
         jester_user_id_entry = ttk.Entry(frame, textvariable=self.jester_user_id_var, width=15)
-        jester_user_id_entry.grid(row=6, column=1, padx=0, pady=3, sticky="w")
+        jester_user_id_entry.grid(row=4, column=1, padx=0, pady=3, sticky="w")
         jester_user_id_entry.bind("<FocusOut>", lambda event: self.save_config())
 
         merchant_no_mt_check = ttk.Checkbutton(
             frame, text="Merchant detection without Merchant Teleporter gamepass.",
             variable=self.detect_merchant_no_mt_var, command=self.save_config
         )
-        merchant_no_mt_check.grid(row=8, column=0, padx=5, pady=3, sticky="w")
+        merchant_no_mt_check.grid(row=6, column=0, padx=5, pady=3, sticky="w")
 
         jester_label = ttk.Label(frame, text="")
-        jester_label.grid(row=6, column=2, padx=5, pady=3, sticky="w")
+        jester_label.grid(row=4, column=2, padx=5, pady=3, sticky="w")
 
         # Required Package Frame
         package_frame = ttk.LabelFrame(frame, text="Required Package For Auto Merchant")
-        package_frame.grid(row=7, column=0, padx=5, pady=5, sticky="nsew")
+        package_frame.grid(row=5, column=0, padx=5, pady=5, sticky="nsew")
 
         # Tesseract OCR Status
         ocr_status = self.check_tesseract_ocr()
@@ -4109,7 +4096,7 @@ class BiomePresence():
 
         github_label = ttk.Label(noteab_frame, text="""GitHub: Coteab Macro!""", foreground="#03cafc", cursor="hand2")
         github_label.pack()
-        github_label.bind("<Button-1>", lambda e: webbrowser.open_new("https://github.com/cresqnt-sys/Noteab-Macro-Unrestricted"))
+        github_label.bind("<Button-1>", lambda e: webbrowser.open_new("https://github.com/xVapure/Noteab-Macro"))
 
         if maxstellar_image:
             ttk.Label(maxstellar_frame, image=maxstellar_image).pack(pady=5)
@@ -4532,7 +4519,7 @@ class BiomePresence():
             return file.readlines()
 
     def load_auras_json(self):
-        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/assets/auras.json"
+        url = "https://raw.githubusercontent.com/xVapure/Noteab-Macro/refs/heads/main/auras.json"
         try:
             r = requests.get(url, timeout=10)
             r.raise_for_status()
@@ -5236,12 +5223,12 @@ class BiomePresence():
             mt_cooldown = timedelta(minutes=1)
 
         try:
-            self._action_scheduler.enqueue_action(self.perform_periodic_aura_screenshot_sync, name="periodical:aura", priority=2)
+            self.perform_periodic_aura_screenshot_sync()
         except Exception:
             pass
 
         try:
-            self._action_scheduler.enqueue_action(self.perform_periodic_inventory_screenshot_sync, name="periodical:inventory", priority=3)
+            self.perform_periodic_inventory_screenshot_sync()
         except Exception:
             pass
 
@@ -5282,7 +5269,6 @@ class BiomePresence():
             self.last_br_time = datetime.now()
 
     def perform_periodic_aura_screenshot_sync(self):
-        inventory_close_button = self.config.get("inventory_close_button", [1418, 298])
         try:
             if not getattr(self, "periodical_aura_var", None) or not self.periodical_aura_var.get():
                 return
@@ -5317,8 +5303,6 @@ class BiomePresence():
                     img.save(filename)
                     self.send_aura_screenshot_webhook(filename)
                     self.last_aura_screenshot_time = datetime.now()
-                    autoit.mouse_click("left", inventory_close_button[0], inventory_close_button[1], 1, speed=3)
-                    time.sleep(0.67)
                 except Exception as e:
                     self.error_logging(e, "Error taking/sending aura screenshot")
         except Exception as e:
@@ -5455,7 +5439,7 @@ class BiomePresence():
         
     def use_br_sc(self, item_name):
         try:
-            self._action_scheduler.enqueue_action(lambda: self._use_br_sc_impl(item_name), name=f"use_br_sc:{item_name}", priority=6)
+            self._action_scheduler.enqueue_action(lambda: self._use_br_sc_impl(item_name), name=f"use_br_sc:{item_name}", priority=1)
         except Exception:
             try:
                 self._use_br_sc_impl(item_name)
@@ -5562,7 +5546,7 @@ class BiomePresence():
 
     def use_merchant_teleporter(self):
         try:
-            self._action_scheduler.enqueue_action(self._merchant_teleporter_impl, name="merchant_tele", priority=5)
+            self._action_scheduler.enqueue_action(self._merchant_teleporter_impl, name="merchant_tele", priority=0)
         except Exception:
             try:
                 self._merchant_teleporter_impl()
@@ -6456,7 +6440,7 @@ class BiomePresence():
 
     def auto_pop_buffs(self):
         try:
-            self._action_scheduler.enqueue_action(self._auto_pop_buffs_impl, name="auto_pop_buffs", priority=0)
+            self._action_scheduler.enqueue_action(self._auto_pop_buffs_impl, name="auto_pop_buffs", priority=1)
         except Exception:
             try:
                 self._auto_pop_buffs_impl()
@@ -6615,5 +6599,3 @@ finally:
         pass
     finally:
         keyboard.unhook_all()
-
-print("vamp") # vamp said he wants to say hi     
